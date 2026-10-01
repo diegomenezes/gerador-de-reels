@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum TopicStatus {
+  new
+  scripted
+  recorded
+  discarded
+}
+
+model Group {
+  id        String    @id @default(cuid())
+  remoteJid String    @unique
+  name      String
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  groupId     String
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  waMessageId String
+  author      String?
+  text        String
+  timestamp   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([groupId, waMessageId])
+  @@index([timestamp])
+}
+
+model Topic {
+  id         String         @id @default(cuid())
+  title      String
+  summary    String
+  frequency  Int            @default(1)
+  score      Float          @default(0)
+  dateBucket String
+  status     TopicStatus    @default(new)
+  userNotes  String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  examples   TopicExample[]
+  scripts    Script[]
+
+  @@index([dateBucket])
+  @@index([status])
+}
+
+model TopicExample {
+  id        String   @id @default(cuid())
+  topicId   String
+  topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime @default(now())
+}
+
+model Script {
+  id           String   @id @default(cuid())
+  topicId      String
+  topic        Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  content      String
+  hooks        String   @default("[]")
+  selectedHook String?
+  caption      String?
+  model        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([topicId])
+}
+
+model JobRun {
+  id            String    @id @default(cuid())
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  success       Boolean   @default(false)
+  running       Boolean   @default(true)
+  stage         String    @default("Iniciando...")
+  messagesIn    Int       @default(0)
+  messagesKept  Int       @default(0)
+  topicsCreated Int       @default(0)
+  error         String?
+}
