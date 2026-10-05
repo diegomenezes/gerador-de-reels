@@ -9,6 +9,7 @@ type TopicCard = {
   summary: string;
   frequency: number;
   score: number;
+  dateBucket: string;
   status: string;
   hasScript: boolean;
   userNotes: string;
@@ -30,23 +31,57 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Todas" },
 ];
 
+function formatDay(dateBucket: string) {
+  const [year, month, day] = dateBucket.split("-");
+  if (!year || !month || !day) return dateBucket;
+  return `${day}/${month}/${year}`;
+}
+
 export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
   const [filter, setFilter] = useState<Filter>("without");
+  const [day, setDay] = useState("all");
 
-  const counts = useMemo(() => {
-    const without = topics.filter((t) => !t.hasScript).length;
-    const withScript = topics.filter((t) => t.hasScript).length;
-    return { without, with: withScript, all: topics.length };
+  const days = useMemo(() => {
+    const unique = [...new Set(topics.map((t) => t.dateBucket))];
+    unique.sort((a, b) => b.localeCompare(a));
+    return unique;
   }, [topics]);
 
+  const byDay = useMemo(() => {
+    if (day === "all") return topics;
+    return topics.filter((t) => t.dateBucket === day);
+  }, [day, topics]);
+
+  const counts = useMemo(() => {
+    const without = byDay.filter((t) => !t.hasScript).length;
+    const withScript = byDay.filter((t) => t.hasScript).length;
+    return { without, with: withScript, all: byDay.length };
+  }, [byDay]);
+
   const visible = useMemo(() => {
-    if (filter === "without") return topics.filter((t) => !t.hasScript);
-    if (filter === "with") return topics.filter((t) => t.hasScript);
-    return topics;
-  }, [filter, topics]);
+    if (filter === "without") return byDay.filter((t) => !t.hasScript);
+    if (filter === "with") return byDay.filter((t) => t.hasScript);
+    return byDay;
+  }, [filter, byDay]);
 
   return (
     <div className="space-y-4">
+      <label className="flex flex-col gap-1 text-sm text-[var(--ink-soft)]">
+        Dia
+        <select
+          className="field max-w-xs"
+          value={day}
+          onChange={(e) => setDay(e.target.value)}
+        >
+          <option value="all">Todos os dias</option>
+          {days.map((date) => (
+            <option key={date} value={date}>
+              {formatDay(date)}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:flex-wrap md:overflow-visible">
         {FILTERS.map((item) => {
           const active = filter === item.id;
@@ -85,7 +120,8 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-soft)]">
-                    #{index + 1} · score {Math.round(topic.score)}
+                    {formatDay(topic.dateBucket)} · #{index + 1} · score{" "}
+                    {Math.round(topic.score)}
                   </p>
                   <h3 className="mt-1 text-xl font-semibold">{topic.title}</h3>
                 </div>

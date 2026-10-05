@@ -121,13 +121,13 @@ export async function runDailyPipeline(
 
     const clustered = await clusterDoubts(compact, 20);
 
-    await prisma.topic.deleteMany({
-      where: {
-        dateBucket,
-        status: "new",
-        scripts: { none: {} },
-      },
+    const existingToday = await prisma.topic.findMany({
+      where: { dateBucket },
+      select: { title: true },
     });
+    const seenTitles = new Set(
+      existingToday.map((t) => t.title.trim().toLowerCase()),
+    );
 
     await setStage(job.id, "Salvando dúvidas...", {
       messagesIn,
@@ -135,6 +135,10 @@ export async function runDailyPipeline(
     });
 
     for (const topic of clustered) {
+      const key = topic.title.trim().toLowerCase();
+      if (seenTitles.has(key)) continue;
+      seenTitles.add(key);
+
       await prisma.topic.create({
         data: {
           title: topic.title,

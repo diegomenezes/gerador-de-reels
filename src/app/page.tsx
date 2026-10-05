@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import { AddManualTopic } from "@/components/AddManualTopic";
 import { GenerateTopButton } from "@/components/GenerateTopButton";
 import { TopicsBoard } from "@/components/TopicsBoard";
@@ -7,23 +6,22 @@ import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const dateBucket = format(new Date(), "yyyy-MM-dd");
   const topics = await prisma.topic.findMany({
     where: {
-      dateBucket,
       status: { not: "discarded" },
     },
     include: {
       examples: true,
       scripts: { orderBy: { createdAt: "desc" }, take: 1 },
     },
-    orderBy: [{ score: "desc" }, { frequency: "desc" }],
+    orderBy: [{ dateBucket: "desc" }, { score: "desc" }, { frequency: "desc" }],
   });
 
   const cards = topics.map((topic) => ({
     id: topic.id,
     title: topic.title,
     summary: topic.summary,
+    dateBucket: topic.dateBucket,
     frequency: topic.frequency,
     score: topic.score,
     status: topic.status,
@@ -47,8 +45,8 @@ export default async function HomePage() {
             Perguntas
           </h2>
           <p className="mt-2 max-w-xl text-[var(--ink-soft)]">
-            Agrupadas a partir dos grupos do WhatsApp. Gere o roteiro e vá
-            gravando.
+            Perguntas de todos os dias ficam aqui. Só saem quando você
+            descartar.
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
@@ -59,8 +57,8 @@ export default async function HomePage() {
 
       {cards.length === 0 ? (
         <div className="card p-6 text-[var(--ink-soft)]">
-          Nenhuma dúvida processada hoje. Adicione uma pergunta manualmente ou
-          rode o job em <strong>Config</strong>.
+          Nenhuma pergunta ainda. Adicione uma manualmente ou rode o job em{" "}
+          <strong>Config</strong>.
         </div>
       ) : (
         <TopicsBoard topics={cards} />
