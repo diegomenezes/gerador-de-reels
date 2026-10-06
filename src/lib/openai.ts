@@ -133,6 +133,86 @@ ${catalog}`,
     .slice(0, topN);
 }
 
+export async function clusterPolemics(
+  messages: CompactMessage[],
+  topN = 8,
+): Promise<ClusteredTopic[]> {
+  if (messages.length === 0) return [];
+
+  const client = getClient();
+  const catalog = messages
+    .map((m, i) => `${i + 1}. [${m.count}x] ${m.text}`)
+    .join("\n");
+
+  const completion = await client.chat.completions.create({
+    model: MODEL_FAST,
+    temperature: 0.35,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "Você caça ideias de Reels polêmicos em conversas de WhatsApp. Responda só JSON válido. Não invente assunto que não esteja nas mensagens.",
+      },
+      {
+        role: "user",
+        content: `Das mensagens abaixo, extraia até ${topN} ideias de Reel que podem viralizar. NÃO são tutoriais.
+
+Procure só isto:
+- alguém falando mal de produto, marca, prática ou pessoa
+- notícia ou "cês viram isso?" que gerou reação
+- discussão com lados opostos
+- reclamação que divide a galera (licença, vender peça proibida, saúde, incêndio, preço, hype)
+
+IGNORE dúvida técnica pura ("como calibro", "qual temperatura"). Isso não é polêmica.
+
+O title é a primeira frase falada do Reel, curta e provocativa, no tom destes exemplos:
+- "Cê baixou no MakerWorld e tá vendendo? Lê a licença."
+- "Para de vender cortador de biscoito em PLA sem avisar isso."
+- "Quem começou na Bambu Lab não sabe imprimir."
+- "Comenta a marca de filamento que você nunca mais compra."
+
+Formatos permitidos:
+1) alerta que divide opinião
+2) opinião impopular, com UM lado
+3) isca de comentário
+
+Regras:
+- Uma briga = um Reel. Não junte assuntos diferentes.
+- Se não houver matéria polêmica de verdade, devolva "topics": []
+- summary = o que aconteceu no grupo e qual lado o vídeo defende
+- frequency = quantas mensagens sustentam aquilo
+- score = potencial de comentário e de dividir opinião (0-100), não utilidade de tutorial
+- examples = 1 a 3 trechos REAIS curtos. Não parafraseie como se fosse citação.
+
+Formato:
+{
+  "topics": [
+    {
+      "title": "frase falada do gancho",
+      "summary": "1-2 frases",
+      "frequency": 3,
+      "score": 85,
+      "examples": ["..."]
+    }
+  ]
+}
+
+Mensagens:
+${catalog}`,
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error("OpenAI não retornou as polêmicas");
+
+  const parsed = ClusterSchema.parse(extractJson(content));
+  return parsed.topics
+    .sort((a, b) => b.score - a.score || b.frequency - a.frequency)
+    .slice(0, topN);
+}
+
 async function researchTopicFacts(input: {
   title: string;
   summary: string;
@@ -230,6 +310,7 @@ export async function generateHookSuggestions(input: {
   summary: string;
   examples: string[];
   hookModels: string;
+  polemic?: boolean;
 }): Promise<string[]> {
   const client = getClient();
 
@@ -242,7 +323,8 @@ export async function generateHookSuggestions(input: {
         role: "system",
         content: `Você cria ganchos fortes para a primeira frase/legenda de Reels no Instagram.
 Use os MODELOS DE GANCHOS como base de estruturas (adapte, não copie genérico sem contexto).
-Foque no tema específico da dúvida. Português do Brasil. Sem markdown.
+Foque no tema específico. Português do Brasil. Sem markdown.
+${input.polemic ? "Este Reel é POLÊMICO: cada gancho tem que dividir opinião ou puxar comentário. Uma frase, um lado só. Sem tutorial." : "Foque na dúvida prática."}
 PROIBIDO metáfora/analogia forçada ("tipo palito de dente", "como sabão", "mais ... que ...").
 Direto e concreto: diga o problema real, sem comparar com objetos.
 ${NOMENCLATURE_RULES}
@@ -347,6 +429,7 @@ export async function generateReelScript(input: {
   examples: string[];
   tone: string;
   userNotes?: string;
+  kind?: "question" | "polemic";
 }): Promise<{ content: string; model: string }> {
   const client = getClient();
   const research = await researchTopicFacts(input);
@@ -362,8 +445,19 @@ export async function generateReelScript(input: {
 TOM DE VOZ:
 ${input.tone}
 
-Fluxo interno (NÃO escreva esses rótulos no texto final):
-gancho → problema → solução em 2-3 pontos → CTA
+${
+  input.kind === "polemic"
+    ? `FORMATO POLÊMICO (prioridade alta):
+- A primeira frase É o gancho: provocação, alerta ou opinião impopular
+- Escolha UM lado. Não faça "os dois lados têm razão"
+- Use os trechos reais do grupo como prova. Não invente notícia, marca, caso ou briga que não está nos exemplos
+- Se a pesquisa mostrar que o que o grupo está falando é mito, o lado do vídeo é desmentir, sem repetir o mito como verdade
+- No meio, pode chamar comentário ("comenta a marca...", "conta o susto que você já levou")
+- Não vire tutorial passo a passo
+- Anti-guru, pé no chão`
+    : `Fluxo interno (NÃO escreva esses rótulos no texto final):
+gancho → problema → solução em 2-3 pontos → CTA`
+}
 
 FORMATAÇÃO DO OUTPUT (obrigatório):
 - Texto para ler em voz alta, em PARÁGRAFOS CURTOS
@@ -425,7 +519,8 @@ ${input.userNotes?.trim() || "(nenhuma ideia extra)"}
 BRIEFING DE PESQUISA (internet / Bambu Lab / Bambu Studio):
 ${research}
 
-LEMBRETE FINAL: zero metáfora/analogia com objetos (nada de "tipo palito de dente"). Fale direto. Use parágrafos curtos com linha em branco entre eles. Não mencione Z-offset.`,
+LEMBRETE FINAL: zero metáfora/analogia com objetos (nada de "tipo palito de dente"). Fale direto. Use parágrafos curtos com linha em branco entre eles. Não mencione Z-offset.
+${input.kind === "polemic" ? "Este é um Reel POLÊMICO: um lado só, comentário no meio, CTA CHAT ou NICHOS só no final." : ""}`,
       },
     ],
   });

@@ -11,12 +11,20 @@ type TopicCard = {
   score: number;
   dateBucket: string;
   status: string;
+  kind: "question" | "polemic";
   hasScript: boolean;
   userNotes: string;
   examples: { id: string; text: string }[];
 };
 
 type Filter = "without" | "with" | "all";
+type KindFilter = "question" | "polemic" | "all";
+
+const KIND_FILTERS: { id: KindFilter; label: string }[] = [
+  { id: "question", label: "Perguntas" },
+  { id: "polemic", label: "Polêmicos" },
+  { id: "all", label: "Todas" },
+];
 
 const STATUS_LABEL: Record<string, string> = {
   new: "Nova",
@@ -39,18 +47,24 @@ function formatDay(dateBucket: string) {
 
 export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
   const [filter, setFilter] = useState<Filter>("without");
+  const [kind, setKind] = useState<KindFilter>("question");
   const [day, setDay] = useState("all");
 
+  const byKind = useMemo(() => {
+    if (kind === "all") return topics;
+    return topics.filter((t) => t.kind === kind);
+  }, [kind, topics]);
+
   const days = useMemo(() => {
-    const unique = [...new Set(topics.map((t) => t.dateBucket))];
+    const unique = [...new Set(byKind.map((t) => t.dateBucket))];
     unique.sort((a, b) => b.localeCompare(a));
     return unique;
-  }, [topics]);
+  }, [byKind]);
 
   const byDay = useMemo(() => {
-    if (day === "all") return topics;
-    return topics.filter((t) => t.dateBucket === day);
-  }, [day, topics]);
+    if (day === "all") return byKind;
+    return byKind.filter((t) => t.dateBucket === day);
+  }, [day, byKind]);
 
   const counts = useMemo(() => {
     const without = byDay.filter((t) => !t.hasScript).length;
@@ -64,8 +78,35 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
     return byDay;
   }, [filter, byDay]);
 
+  const kindCounts = useMemo(() => {
+    return {
+      question: topics.filter((t) => t.kind === "question").length,
+      polemic: topics.filter((t) => t.kind === "polemic").length,
+      all: topics.length,
+    };
+  }, [topics]);
+
   return (
     <div className="space-y-4">
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:flex-wrap md:overflow-visible">
+        {KIND_FILTERS.map((item) => {
+          const active = kind === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setKind(item.id)}
+              className={`btn shrink-0 text-sm ${active ? "btn-primary" : "btn-secondary"}`}
+            >
+              {item.label}
+              <span className={active ? "opacity-90" : "opacity-70"}>
+                ({kindCounts[item.id]})
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <label className="flex flex-col gap-1 text-sm text-[var(--ink-soft)]">
         Dia
         <select
@@ -109,9 +150,9 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
 
       {visible.length === 0 ? (
         <div className="card p-6 text-[var(--ink-soft)]">
-          {filter === "without" && "Nenhuma dúvida sem roteiro."}
-          {filter === "with" && "Nenhuma dúvida com roteiro ainda."}
-          {filter === "all" && "Nenhuma dúvida nesta lista."}
+          {filter === "without" && "Nada sem roteiro neste filtro."}
+          {filter === "with" && "Nada com roteiro neste filtro."}
+          {filter === "all" && "Nada nesta lista."}
         </div>
       ) : (
         <div className="space-y-4">
@@ -126,6 +167,9 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
                   <h3 className="mt-1 text-xl font-semibold">{topic.title}</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {topic.kind === "polemic" && (
+                    <span className="badge badge-warn">Polêmico</span>
+                  )}
                   <span className="badge">{topic.frequency}x</span>
                   <span
                     className={`badge ${

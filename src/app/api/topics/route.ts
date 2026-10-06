@@ -7,6 +7,7 @@ const Schema = z.object({
   title: z.string().trim().min(3, "Título muito curto").max(200),
   summary: z.string().trim().max(500).optional(),
   userNotes: z.string().trim().max(2000).optional(),
+  kind: z.enum(["question", "polemic"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const { title, summary, userNotes } = parsed.data;
+  const { title, summary, userNotes, kind } = parsed.data;
   const dateBucket = format(new Date(), "yyyy-MM-dd");
 
   const topic = await prisma.topic.create({
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       score: 100,
       dateBucket,
       status: "new",
+      kind: kind || "question",
       userNotes: userNotes || null,
       examples: {
         create: [{ text: title }],

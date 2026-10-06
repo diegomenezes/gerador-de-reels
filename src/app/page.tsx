@@ -25,6 +25,7 @@ export default async function HomePage() {
     frequency: topic.frequency,
     score: topic.score,
     status: topic.status,
+    kind: topic.kind,
     hasScript: topic.scripts.length > 0,
     userNotes: topic.userNotes || "",
     examples: topic.examples.map((ex) => ({ id: ex.id, text: ex.text })),
@@ -45,8 +46,7 @@ export default async function HomePage() {
             Perguntas
           </h2>
           <p className="mt-2 max-w-xl text-[var(--ink-soft)]">
-            Perguntas de todos os dias ficam aqui. Só saem quando você
-            descartar.
+            Perguntas e polêmicos ficam aqui. Só saem quando você descartar.
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">

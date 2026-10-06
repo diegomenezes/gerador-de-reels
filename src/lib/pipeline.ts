@@ -5,6 +5,7 @@ import { compactMessages } from "./filter";
 import { readHookModels } from "./hook-models";
 import {
   clusterDoubts,
+  clusterPolemics,
   generateHookSuggestions,
   generateInstagramCaption,
   generateReelScript,
@@ -114,12 +115,19 @@ export async function runDailyPipeline(
     );
     messagesKept = compact.reduce((acc, m) => acc + m.count, 0);
 
-    await setStage(job.id, "Agrupando dúvidas com IA...", {
+    await setStage(job.id, "Agrupando dúvidas e polêmicas...", {
       messagesIn,
       messagesKept,
     });
 
-    const clustered = await clusterDoubts(compact, 20);
+    const [questions, polemics] = await Promise.all([
+      clusterDoubts(compact, 15),
+      clusterPolemics(compact, 8),
+    ]);
+    const clustered = [
+      ...questions.map((topic) => ({ ...topic, kind: "question" as const })),
+      ...polemics.map((topic) => ({ ...topic, kind: "polemic" as const })),
+    ];
 
     const existingToday = await prisma.topic.findMany({
       where: { dateBucket },
@@ -147,6 +155,7 @@ export async function runDailyPipeline(
           score: topic.score,
           dateBucket,
           status: "new",
+          kind: topic.kind,
           examples: {
             create: topic.examples.slice(0, 5).map((text) => ({ text })),
           },
@@ -247,6 +256,7 @@ export async function createScriptForTopic(
     examples,
     tone,
     userNotes,
+    kind: topic.kind === "polemic" ? "polemic" : "question",
   });
 
   const hooks = keepHooks
@@ -257,6 +267,7 @@ export async function createScriptForTopic(
           summary: topic.summary,
           examples,
           hookModels,
+          polemic: topic.kind === "polemic",
         }),
       );
 
@@ -303,6 +314,7 @@ export async function regenerateHooksForTopic(topicId: string) {
     summary: topic.summary,
     examples: topic.examples.map((e) => e.text),
     hookModels,
+    polemic: topic.kind === "polemic",
   });
 
   return prisma.script.update({
@@ -355,6 +367,7 @@ export async function createScriptsForTopTopics(limit = 10) {
     where: {
       dateBucket,
       status: "new",
+      kind: "question",
     },
     orderBy: [{ score: "desc" }, { frequency: "desc" }],
     take: limit,

@@ -9,6 +9,7 @@ export function AddManualTopic() {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [userNotes, setUserNotes] = useState("");
+  const [kind, setKind] = useState<"question" | "polemic">("question");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,13 +21,14 @@ export function AddManualTopic() {
       const res = await fetch("/api/topics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, summary, userNotes }),
+        body: JSON.stringify({ title, summary, userNotes, kind }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao criar pergunta");
       setTitle("");
       setSummary("");
       setUserNotes("");
+      setKind("question");
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -64,7 +66,24 @@ export function AddManualTopic() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm text-[var(--ink-soft)]">Pergunta / tema</label>
+            <label className="text-sm text-[var(--ink-soft)]">Tipo</label>
+            <select
+              className="field"
+              value={kind}
+              onChange={(e) =>
+                setKind(e.target.value === "polemic" ? "polemic" : "question")
+              }
+              disabled={loading}
+            >
+              <option value="question">Pergunta</option>
+              <option value="polemic">Polêmico</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm text-[var(--ink-soft)]">
+              {kind === "polemic" ? "Frase do gancho" : "Pergunta / tema"}
+            </label>
             <input
               className="field"
               value={title}
