@@ -4,6 +4,9 @@ export type EvolutionMessage = {
   text: string;
   timestamp: Date;
   remoteJid: string;
+  fromMe: boolean;
+  participant: string | null;
+  pushName: string | null;
 };
 
 type FetchOptions = {
@@ -88,13 +91,27 @@ function normalizeRecord(
     (typeof raw.remoteJid === "string" && raw.remoteJid) ||
     fallbackJid;
 
-  const author =
+  const participant =
     (typeof key.participant === "string" && key.participant) ||
     (typeof raw.participant === "string" && raw.participant) ||
-    (typeof raw.pushName === "string" && raw.pushName) ||
     null;
+  const pushName =
+    (typeof raw.pushName === "string" && raw.pushName) ||
+    (typeof key.pushName === "string" && key.pushName) ||
+    null;
+  const author = participant || pushName;
+  const fromMe = key.fromMe === true || raw.fromMe === true;
 
-  return { waMessageId, author, text, timestamp, remoteJid };
+  return {
+    waMessageId,
+    author,
+    text,
+    timestamp,
+    remoteJid,
+    fromMe,
+    participant,
+    pushName,
+  };
 }
 
 function unwrapList(payload: unknown): Record<string, unknown>[] {
@@ -206,6 +223,115 @@ export async function fetchGroupMessages({
   return collected.sort(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
   );
+}
+
+export async function sendTextMessage(
+  number: string,
+  text: string,
+): Promise<void> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const digits = number.replace(/\D/g, "");
+  const res = await fetch(`${baseUrl}/message/sendText/${instance}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: apiKey,
+    },
+    body: JSON.stringify({ number: digits || number, text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao avisar no WhatsApp: ${await res.text()}`);
+  }
+}
+
+export async function deleteMessageForEveryone(input: {
+  id: string;
+  remoteJid: string;
+  participant: string | null;
+}): Promise<void> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const res = await fetch(
+    `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        id: input.id,
+        remoteJid: input.remoteJid,
+        fromMe: false,
+        participant: input.participant,
+      }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`Falha ao apagar mensagem: ${await res.text()}`);
+  }
+}
+
+export type EvolutionWebhook = {
+  enabled: boolean;
+  url: string;
+  events: string[];
+};
+
+function readWebhook(payload: unknown): EvolutionWebhook {
+  const root =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  const nested =
+    root.webhook && typeof root.webhook === "object"
+      ? (root.webhook as Record<string, unknown>)
+      : root;
+  const events = Array.isArray(nested.events)
+    ? nested.events.filter((e): e is string => typeof e === "string")
+    : [];
+  return {
+    enabled: nested.enabled !== false,
+    url: typeof nested.url === "string" ? nested.url : "",
+    events,
+  };
+}
+
+export async function findWebhook(): Promise<EvolutionWebhook | null> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const res = await fetch(`${baseUrl}/webhook/find/${instance}`, {
+    headers: { apikey: apiKey },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Falha ao ler webhook: ${await res.text()}`);
+  }
+  return readWebhook(await res.json());
+}
+
+export async function setWebhook(input: {
+  url: string;
+  events: string[];
+}): Promise<void> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const res = await fetch(`${baseUrl}/webhook/set/${instance}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: apiKey,
+    },
+    body: JSON.stringify({
+      webhook: {
+        enabled: true,
+        url: input.url,
+        webhookByEvents: false,
+        webhookBase64: false,
+        events: input.events,
+      },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao registrar webhook: ${await res.text()}`);
+  }
 }
 
 export async function testEvolutionConnection(): Promise<{

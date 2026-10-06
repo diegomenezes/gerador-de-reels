@@ -85,6 +85,53 @@ model Script {
   @@index([topicId])
 }
 
+model ModerationSettings {
+  id           String   @id @default("default")
+  enabled      Boolean  @default(true)
+  deleteMode   Boolean  @default(false)
+  notifyNumber String   @default("")
+  updatedAt    DateTime @updatedAt
+}
+
+model BlockedDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model WhitelistLink {
+  id        String   @id @default(cuid())
+  url       String   @unique
+  createdAt DateTime @default(now())
+}
+
+model AdminLink {
+  id        String   @id @default(cuid())
+  urlKey    String   @unique
+  sample    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model ModerationEvent {
+  id          String   @id @default(cuid())
+  groupJid    String
+  waMessageId String
+  groupName   String
+  author      String
+  text        String
+  matchedUrl  String
+  action      String
+  detail      String?
+  messageAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([groupJid, waMessageId])
+  @@index([createdAt])
+}
+
 model JobRun {
   id            String    @id @default(cuid())
   startedAt     DateTime  @default(now())

@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Perguntas", short: "Perguntas" },
   { href: "/roteiros", label: "Roteiros", short: "Roteiros" },
   { href: "/grupos", label: "Grupos", short: "Grupos" },
+  { href: "/moderacao", label: "Moderação", short: "Modera" },
   { href: "/config", label: "Config", short: "Config" },
 ];
 
@@ -73,7 +74,7 @@ export function Nav() {
         className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--line)] bg-[rgba(255,252,246,0.94)] px-2 pt-2 backdrop-blur-md md:hidden"
         style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
       >
-        <div className="mx-auto grid max-w-5xl grid-cols-4 gap-1">
+        <div className="mx-auto grid max-w-5xl grid-cols-5 gap-1">
           {LINKS.map((link) => {
             const active = isActive(pathname, link.href);
             return (

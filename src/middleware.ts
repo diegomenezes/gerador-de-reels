@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const COOKIE_NAME = "gr_session";
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/cron"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/login",
+  "/api/cron",
+  "/api/moderation/webhook",
+];
 
 function getSecret(password: string) {
   return new TextEncoder().encode(`gerador-reels:${password}`);
