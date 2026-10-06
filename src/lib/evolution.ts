@@ -323,6 +323,7 @@ export async function setWebhook(input: {
       webhook: {
         enabled: true,
         url: input.url,
+        headers: { apikey: apiKey },
         webhookByEvents: false,
         webhookBase64: false,
         events: input.events,
