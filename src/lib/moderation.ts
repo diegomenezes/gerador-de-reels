@@ -1,8 +1,10 @@
 import { prisma } from "./db";
 import {
   deleteMessageForEveryone,
+  fetchGroupAdminIds,
   fetchGroupMessages,
   findWebhook,
+  senderIsGroupAdmin,
   sendTextMessage,
   setWebhook,
   type EvolutionMessage,
@@ -23,6 +25,7 @@ export type IncomingMessage = {
   remoteJid: string;
   fromMe: boolean;
   participant: string | null;
+  participantAlt: string | null;
   pushName: string | null;
   text: string;
   timestamp: Date;
@@ -134,6 +137,10 @@ export function parseEvolutionWebhook(body: unknown): IncomingMessage[] {
       remoteJid,
       fromMe: key.fromMe === true,
       participant: typeof key.participant === "string" ? key.participant : null,
+      participantAlt:
+        (typeof key.participantAlt === "string" && key.participantAlt) ||
+        (typeof key.participantPn === "string" && key.participantPn) ||
+        null,
       pushName: typeof raw.pushName === "string" ? raw.pushName : null,
       text: text.trim(),
       timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
@@ -170,6 +177,14 @@ export async function processModerationMessage(message: IncomingMessage) {
   if (message.fromMe) {
     await rememberAdminLinks(urls);
     return { ignored: true as const, adminLinks: urls.length };
+  }
+
+  const adminIds = await fetchGroupAdminIds(message.remoteJid);
+  if (
+    adminIds &&
+    senderIsGroupAdmin(adminIds, [message.participant, message.participantAlt])
+  ) {
+    return { ignored: true as const };
   }
 
   const [settings, domains, whitelist, adminLinks] = await Promise.all([
@@ -311,6 +326,7 @@ function toIncoming(message: EvolutionMessage): IncomingMessage {
     remoteJid: message.remoteJid,
     fromMe: message.fromMe,
     participant: message.participant,
+    participantAlt: message.participantAlt,
     pushName: message.pushName,
     text: message.text,
     timestamp: message.timestamp,

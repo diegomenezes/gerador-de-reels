@@ -77,6 +77,8 @@ export function ModerationPanel({
           <h3 className="font-semibold">Modo</h3>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Começa só avisando. Apagar fica desligado até você ligar.
+            Admins do grupo ficam de fora, assim como o número conectado na
+            Evolution.
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm">

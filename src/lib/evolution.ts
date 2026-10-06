@@ -6,6 +6,7 @@ export type EvolutionMessage = {
   remoteJid: string;
   fromMe: boolean;
   participant: string | null;
+  participantAlt: string | null;
   pushName: string | null;
 };
 
@@ -95,6 +96,11 @@ function normalizeRecord(
     (typeof key.participant === "string" && key.participant) ||
     (typeof raw.participant === "string" && raw.participant) ||
     null;
+  const participantAlt =
+    (typeof key.participantAlt === "string" && key.participantAlt) ||
+    (typeof key.participantPn === "string" && key.participantPn) ||
+    (typeof raw.participantAlt === "string" && raw.participantAlt) ||
+    null;
   const pushName =
     (typeof raw.pushName === "string" && raw.pushName) ||
     (typeof key.pushName === "string" && key.pushName) ||
@@ -110,6 +116,7 @@ function normalizeRecord(
     remoteJid,
     fromMe,
     participant,
+    participantAlt,
     pushName,
   };
 }
@@ -222,6 +229,93 @@ export async function fetchGroupMessages({
 
   return collected.sort(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+  );
+}
+
+function canonicalJid(value: string): string {
+  return value.trim().toLowerCase().replace(/:\d+(?=@)/, "");
+}
+
+function addJid(ids: Set<string>, value: unknown) {
+  if (typeof value !== "string" || !value.includes("@")) return;
+  ids.add(canonicalJid(value));
+}
+
+const adminCache = new Map<
+  string,
+  { until: number; ids: Set<string> | null }
+>();
+
+function readParticipants(payload: unknown): Record<string, unknown>[] {
+  if (!payload || typeof payload !== "object") return [];
+  const root = payload as Record<string, unknown>;
+  const direct = root.participants;
+  if (Array.isArray(direct)) {
+    return direct.filter((item) => item && typeof item === "object") as Record<
+      string,
+      unknown
+    >[];
+  }
+  const data = root.data;
+  if (data && typeof data === "object") {
+    const nested = (data as Record<string, unknown>).participants;
+    if (Array.isArray(nested)) {
+      return nested.filter((item) => item && typeof item === "object") as Record<
+        string,
+        unknown
+      >[];
+    }
+  }
+  return [];
+}
+
+export async function fetchGroupAdminIds(
+  remoteJid: string,
+): Promise<Set<string> | null> {
+  const cached = adminCache.get(remoteJid);
+  if (cached && cached.until > Date.now()) return cached.ids;
+
+  const { baseUrl, apiKey, instance } = getConfig();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(
+      `${baseUrl}/group/findGroupInfos/${instance}?groupJid=${encodeURIComponent(remoteJid)}`,
+      { headers: { apikey: apiKey }, signal: controller.signal },
+    );
+    if (!res.ok) {
+      adminCache.set(remoteJid, { until: Date.now() + 60_000, ids: null });
+      return null;
+    }
+
+    const ids = new Set<string>();
+    for (const participant of readParticipants(await res.json())) {
+      const role = participant.admin;
+      const isAdmin =
+        role === "admin" || role === "superadmin" || role === true;
+      if (!isAdmin) continue;
+      addJid(ids, participant.id);
+      addJid(ids, participant.lid);
+      addJid(ids, participant.phoneNumber);
+      addJid(ids, participant.jid);
+    }
+
+    adminCache.set(remoteJid, { until: Date.now() + 10 * 60_000, ids });
+    return ids;
+  } catch {
+    adminCache.set(remoteJid, { until: Date.now() + 60_000, ids: null });
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function senderIsGroupAdmin(
+  adminIds: Set<string>,
+  candidates: Array<string | null | undefined>,
+): boolean {
+  return candidates.some(
+    (value) => typeof value === "string" && adminIds.has(canonicalJid(value)),
   );
 }
 
