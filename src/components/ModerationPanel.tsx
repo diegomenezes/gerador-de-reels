@@ -286,7 +286,27 @@ export function ModerationPanel({
       </section>
 
       <section className="space-y-3">
-        <h3 className="font-semibold">Histórico</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-semibold">Histórico</h3>
+          {events.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-danger text-sm"
+              disabled={!!loading}
+              onClick={() => {
+                if (!window.confirm("Apagar todo o histórico de alertas?")) return;
+                run("events-all", async () => {
+                  const res = await fetch("/api/moderation/events", {
+                    method: "DELETE",
+                  });
+                  if (!res.ok) throw new Error("Falha ao apagar o histórico");
+                });
+              }}
+            >
+              {loading === "events-all" ? "Apagando..." : "Apagar todos"}
+            </button>
+          )}
+        </div>
         {events.length === 0 ? (
           <div className="card p-5 text-sm text-[var(--ink-soft)]">
             Nenhum link barrado ainda.
@@ -296,9 +316,27 @@ export function ModerationPanel({
             <article key={event.id} className="card space-y-2 p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-semibold">{event.groupName}</p>
-                <span className="badge badge-warn">
-                  {ACTION_LABEL[event.action] || event.action}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge-warn">
+                    {ACTION_LABEL[event.action] || event.action}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-danger text-sm"
+                    disabled={!!loading}
+                    onClick={() =>
+                      run(`event-${event.id}`, async () => {
+                        const res = await fetch(
+                          `/api/moderation/events/${event.id}`,
+                          { method: "DELETE" },
+                        );
+                        if (!res.ok) throw new Error("Falha ao apagar o alerta");
+                      })
+                    }
+                  >
+                    {loading === `event-${event.id}` ? "Apagando..." : "Apagar"}
+                  </button>
+                </div>
               </div>
               <p className="text-sm text-[var(--ink-soft)]">
                 {event.author} ·{" "}
