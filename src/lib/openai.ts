@@ -61,9 +61,24 @@ function extractJson(content: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
+export type CoveredTheme = { title: string; summary: string };
+
+function coveredThemesBlock(themes: CoveredTheme[]): string {
+  if (themes.length === 0) return "";
+  const lines = themes
+    .slice(0, 80)
+    .map((theme) => `- ${theme.title}: ${theme.summary}`)
+    .join("\n");
+  return `
+Temas que JÁ têm roteiro ou já foram gravados. Não crie de novo, nem com outras palavras:
+${lines}
+`;
+}
+
 export async function clusterDoubts(
   messages: CompactMessage[],
   topN = 15,
+  covered: CoveredTheme[] = [],
 ): Promise<ClusteredTopic[]> {
   if (messages.length === 0) return [];
 
@@ -104,7 +119,7 @@ Outras regras:
 - frequency = soma das ocorrências daquela pergunta específica
 - score = potencial de Reel (0-100): clareza + utilidade + recorrência
 - examples = 1 a 3 trechos reais curtos DAQUELA dúvida
-
+${coveredThemesBlock(covered)}
 Formato:
 {
   "topics": [
@@ -136,6 +151,7 @@ ${catalog}`,
 export async function clusterPolemics(
   messages: CompactMessage[],
   topN = 8,
+  covered: CoveredTheme[] = [],
 ): Promise<ClusteredTopic[]> {
   if (messages.length === 0) return [];
 
@@ -184,7 +200,7 @@ Regras:
 - frequency = quantas mensagens sustentam aquilo
 - score = potencial de comentário e de dividir opinião (0-100), não utilidade de tutorial
 - examples = 1 a 3 trechos REAIS curtos. Não parafraseie como se fosse citação.
-
+${coveredThemesBlock(covered)}
 Formato:
 {
   "topics": [

@@ -97,3 +97,79 @@ export function compactMessages(
     .sort((a, b) => b.count - a.count || b.text.length - a.text.length)
     .slice(0, maxItems);
 }
+
+const THEME_STOPWORDS = new Set([
+  "a",
+  "o",
+  "as",
+  "os",
+  "de",
+  "da",
+  "do",
+  "das",
+  "dos",
+  "e",
+  "que",
+  "com",
+  "um",
+  "uma",
+  "para",
+  "pra",
+  "pro",
+  "no",
+  "na",
+  "nos",
+  "nas",
+  "em",
+  "por",
+  "se",
+  "eu",
+  "voce",
+  "nao",
+  "ja",
+  "mais",
+  "como",
+  "qual",
+  "isso",
+  "essa",
+  "esse",
+  "esta",
+  "este",
+  "ao",
+  "aos",
+]);
+
+function themeTokens(text: string): string[] {
+  const clean = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ");
+  return clean
+    .split(/\s+/)
+    .filter((token) => token.length > 2 && !THEME_STOPWORDS.has(token))
+    .map((token) =>
+      token.length > 4 && token.endsWith("s") ? token.slice(0, -1) : token,
+    );
+}
+
+/** Mesmo assunto de Reel, mesmo com artigo, plural ou pontuação diferentes. */
+export function sameReelTheme(a: string, b: string): boolean {
+  const left = themeTokens(a);
+  const right = themeTokens(b);
+  if (left.length === 0 || right.length === 0) return false;
+  if (left.join(" ") === right.join(" ")) return true;
+
+  const setA = new Set(left);
+  const setB = new Set(right);
+  let shared = 0;
+  for (const token of setA) {
+    if (setB.has(token)) shared += 1;
+  }
+  const shorter = Math.min(setA.size, setB.size);
+  const union = setA.size + setB.size - shared;
+  return (
+    (shorter >= 3 && shared / shorter >= 0.8) ||
+    (shared >= 3 && shared / union >= 0.75)
+  );
+}

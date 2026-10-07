@@ -1,7 +1,7 @@
 import { format } from "date-fns";
 import { prisma } from "./db";
 import { fetchGroupMessages } from "./evolution";
-import { compactMessages } from "./filter";
+import { compactMessages, sameReelTheme } from "./filter";
 import { readHookModels } from "./hook-models";
 import {
   clusterDoubts,
@@ -120,9 +120,21 @@ export async function runDailyPipeline(
       messagesKept,
     });
 
+    const covered = await prisma.topic.findMany({
+      where: {
+        OR: [
+          { scripts: { some: {} } },
+          { status: { in: ["scripted", "recorded"] } },
+        ],
+      },
+      select: { title: true, summary: true },
+      orderBy: { updatedAt: "desc" },
+      take: 80,
+    });
+
     const [questions, polemics] = await Promise.all([
-      clusterDoubts(compact, 15),
-      clusterPolemics(compact, 8),
+      clusterDoubts(compact, 15, covered),
+      clusterPolemics(compact, 8, covered),
     ]);
     const clustered = [
       ...questions.map((topic) => ({ ...topic, kind: "question" as const })),
@@ -142,10 +154,16 @@ export async function runDailyPipeline(
       messagesKept,
     });
 
+    const coveredTitles = covered.map((topic) => topic.title);
+
     for (const topic of clustered) {
       const key = topic.title.trim().toLowerCase();
       if (seenTitles.has(key)) continue;
+      if (coveredTitles.some((title) => sameReelTheme(topic.title, title))) {
+        continue;
+      }
       seenTitles.add(key);
+      coveredTitles.push(topic.title);
 
       await prisma.topic.create({
         data: {
