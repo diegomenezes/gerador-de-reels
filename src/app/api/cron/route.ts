@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runDailyPipeline } from "@/lib/pipeline";
+import { startDailyPipelineWithRetries } from "@/lib/pipeline";
 
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -17,8 +17,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const result = await runDailyPipeline();
-  return NextResponse.json(result, { status: result.success ? 200 : 500 });
+  const result = startDailyPipelineWithRetries();
+  return NextResponse.json(result, { status: result.started ? 202 : 200 });
 }
 
 export async function POST(request: Request) {

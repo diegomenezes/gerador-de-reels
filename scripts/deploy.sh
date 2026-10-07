@@ -35,5 +35,5 @@ else
   echo "PM2 não encontrado. Suba com: npm run start"
 fi
 
-echo "==> Lembrete de cron (06:00):"
+echo "==> Lembrete de cron (06:00). Se falhar, o sistema tenta de novo mais 2 vezes, com 20 minutos de intervalo:"
 echo '0 6 * * * curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" http://127.0.0.1:3010/api/cron >/dev/null 2>&1'

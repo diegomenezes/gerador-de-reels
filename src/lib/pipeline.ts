@@ -230,6 +230,51 @@ export async function runDailyPipeline(
   }
 }
 
+const CRON_ATTEMPTS = 3;
+const CRON_RETRY_GAP_MS = 20 * 60 * 1000;
+
+let scheduledCron: Promise<void> | null = null;
+
+export function startDailyPipelineWithRetries(): {
+  started: boolean;
+  alreadyRunning: boolean;
+  attempts: number;
+  gapMinutes: number;
+} {
+  if (scheduledCron) {
+    return {
+      started: false,
+      alreadyRunning: true,
+      attempts: CRON_ATTEMPTS,
+      gapMinutes: 20,
+    };
+  }
+
+  scheduledCron = (async () => {
+    try {
+      for (let attempt = 1; attempt <= CRON_ATTEMPTS; attempt += 1) {
+        const result = await runDailyPipeline();
+        if (result.success) return;
+        if (attempt < CRON_ATTEMPTS) {
+          console.log(
+            `[cron] tentativa ${attempt} falhou: ${result.error ?? "erro desconhecido"}. Nova tentativa em 20 minutos.`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, CRON_RETRY_GAP_MS));
+        }
+      }
+    } finally {
+      scheduledCron = null;
+    }
+  })();
+
+  return {
+    started: true,
+    alreadyRunning: false,
+    attempts: CRON_ATTEMPTS,
+    gapMinutes: 20,
+  };
+}
+
 export async function createScriptForTopic(
   topicId: string,
   options?: { userNotes?: string },
