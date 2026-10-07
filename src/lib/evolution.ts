@@ -324,14 +324,17 @@ export async function sendTextMessage(
   text: string,
 ): Promise<void> {
   const { baseUrl, apiKey, instance } = getConfig();
-  const digits = number.replace(/\D/g, "");
+  const destination = number.trim();
+  const target = destination.toLowerCase().endsWith("@g.us")
+    ? destination
+    : destination.replace(/\D/g, "");
   const res = await fetch(`${baseUrl}/message/sendText/${instance}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       apikey: apiKey,
     },
-    body: JSON.stringify({ number: digits || number, text }),
+    body: JSON.stringify({ number: target || destination, text }),
   });
   if (!res.ok) {
     throw new Error(`Falha ao avisar no WhatsApp: ${await res.text()}`);

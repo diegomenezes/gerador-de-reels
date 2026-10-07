@@ -63,6 +63,20 @@ export function linkKey(raw: string): string | null {
   }
 }
 
+export function toGroupJid(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const digits = (
+    trimmed.toLowerCase().endsWith("@g.us")
+      ? trimmed.slice(0, -"@g.us".length)
+      : trimmed.includes("@")
+        ? ""
+        : trimmed
+  ).replace(/\D/g, "");
+  if (!/^\d{15,24}$/.test(digits)) return null;
+  return `${digits}@g.us`;
+}
+
 export function hostMatchesDomain(hostname: string, domain: string): boolean {
   const host = hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
   const blocked = domain.toLowerCase().replace(/^\.+/, "").replace(/^www\./, "");
@@ -240,7 +254,8 @@ export async function processModerationMessage(message: IncomingMessage) {
   let action = "notified";
   let detail: string | null = null;
 
-  if (settings.notifyNumber.trim()) {
+  const notifyGroup = toGroupJid(settings.notifyNumber);
+  if (notifyGroup) {
     const when = message.timestamp.toLocaleString("pt-BR", {
       timeZone: "America/Sao_Paulo",
     });
@@ -249,7 +264,7 @@ export async function processModerationMessage(message: IncomingMessage) {
       : "Modo: só aviso. A mensagem não foi apagada.";
     try {
       await sendTextMessage(
-        settings.notifyNumber,
+        notifyGroup,
         [
           `Link bloqueado em ${group.name}`,
           `Quem: ${author}`,
@@ -266,7 +281,9 @@ export async function processModerationMessage(message: IncomingMessage) {
       action = "notify_failed";
     }
   } else {
-    detail = "Número de aviso não configurado";
+    detail = notifyGroup === ""
+      ? "Grupo de aviso não configurado"
+      : "ID do grupo de aviso inválido";
     action = "notify_failed";
   }
 

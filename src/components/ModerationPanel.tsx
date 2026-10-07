@@ -47,7 +47,7 @@ export function ModerationPanel({
   webhookUrl,
 }: Props) {
   const router = useRouter();
-  const [number, setNumber] = useState(notifyNumber);
+  const [groupJid, setGroupJid] = useState(notifyNumber);
   const [isEnabled, setIsEnabled] = useState(enabled);
   const [willDelete, setWillDelete] = useState(deleteMode);
   const [domain, setDomain] = useState("");
@@ -99,14 +99,18 @@ export function ModerationPanel({
         </label>
         <div className="space-y-1">
           <label className="text-sm text-[var(--ink-soft)]">
-            WhatsApp que recebe o aviso
+            Grupo que recebe o aviso
           </label>
           <input
             className="field"
-            value={number}
-            onChange={(e) => setNumber(e.target.value)}
-            placeholder="5511999999999"
+            value={groupJid}
+            onChange={(e) => setGroupJid(e.target.value)}
+            placeholder="120363405756239332@g.us"
           />
+          <p className="text-sm text-[var(--ink-soft)]">
+            ID do grupo, no mesmo formato da aba Grupos. O WhatsApp conectado
+            na Evolution precisa participar desse grupo.
+          </p>
         </div>
         <button
           type="button"
@@ -120,7 +124,7 @@ export function ModerationPanel({
                 body: JSON.stringify({
                   enabled: isEnabled,
                   deleteMode: willDelete,
-                  notifyNumber: number,
+                  notifyNumber: groupJid,
                 }),
               });
               const data = await res.json();
