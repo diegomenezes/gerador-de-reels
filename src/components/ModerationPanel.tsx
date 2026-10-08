@@ -137,29 +137,48 @@ export function ModerationPanel({
             na Evolution precisa participar desse grupo.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary text-sm"
-          disabled={!!loading}
-          onClick={() =>
-            run("settings", async () => {
-              const res = await fetch("/api/moderation/settings", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  enabled: isEnabled,
-                  deleteMode: willDelete,
-                  notifyNumber: groupJid,
-                }),
-              });
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error || "Falha ao salvar");
-              setInfo("Configuração salva.");
-            })
-          }
-        >
-          {loading === "settings" ? "Salvando..." : "Salvar"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn btn-primary text-sm"
+            disabled={!!loading}
+            onClick={() =>
+              run("settings", async () => {
+                const res = await fetch("/api/moderation/settings", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    enabled: isEnabled,
+                    deleteMode: willDelete,
+                    notifyNumber: groupJid,
+                  }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Falha ao salvar");
+                setInfo("Configuração salva.");
+              })
+            }
+          >
+            {loading === "settings" ? "Salvando..." : "Salvar"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={!!loading}
+            onClick={() =>
+              run("test-message", async () => {
+                const res = await fetch("/api/moderation/test", { method: "POST" });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  throw new Error(data.error || "Falha ao disparar o teste");
+                }
+                setInfo("Mensagem de teste enviada para o grupo de aviso.");
+              })
+            }
+          >
+            {loading === "test-message" ? "Enviando..." : "DISPARAR MENSAGEM TESTE"}
+          </button>
+        </div>
       </section>
 
       <section className="card space-y-3 p-5">
