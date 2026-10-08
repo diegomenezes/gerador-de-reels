@@ -432,6 +432,97 @@ export async function setWebhook(input: {
   }
 }
 
+export type EvolutionHealth = {
+  ok: boolean;
+  title: string;
+  detail: string;
+};
+
+async function fetchEvolution(
+  url: string,
+  apiKey: string,
+  timeoutMs = 8000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      headers: { apikey: apiKey },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function checkEvolutionHealth(
+  groupJid?: string | null,
+): Promise<EvolutionHealth> {
+  try {
+    const { baseUrl, apiKey, instance } = getConfig();
+    const stateRes = await fetchEvolution(
+      `${baseUrl}/instance/connectionState/${instance}`,
+      apiKey,
+    );
+    if (!stateRes.ok) {
+      return {
+        ok: false,
+        title: "Evolution fora",
+        detail: "A API da Evolution não respondeu.",
+      };
+    }
+
+    const stateJson = (await stateRes.json()) as {
+      instance?: { state?: string };
+    };
+    const state = stateJson.instance?.state ?? "desconhecido";
+    if (state !== "open") {
+      return {
+        ok: false,
+        title: "Evolution fora",
+        detail: `A sessão do WhatsApp está ${state}. Conecte de novo no painel da Evolution.`,
+      };
+    }
+
+    if (!groupJid) {
+      return {
+        ok: true,
+        title: "Evolution conectada",
+        detail: "A sessão está aberta.",
+      };
+    }
+
+    const infoRes = await fetchEvolution(
+      `${baseUrl}/group/findGroupInfos/${instance}?groupJid=${encodeURIComponent(groupJid)}`,
+      apiKey,
+    );
+    const infoText = await infoRes.text();
+    if (!infoRes.ok || /connection closed/i.test(infoText)) {
+      return {
+        ok: false,
+        title: "Evolution fora",
+        detail:
+          "A sessão aparece aberta, mas não está lendo os grupos. Na VPS, reinicie o serviço evolution_evolution_api.",
+      };
+    }
+
+    return {
+      ok: true,
+      title: "Evolution conectada",
+      detail: "A sessão está aberta e os grupos estão respondendo.",
+    };
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      title: "Evolution fora",
+      detail: aborted
+        ? "A Evolution demorou demais para responder."
+        : "Não consegui falar com a Evolution.",
+    };
+  }
+}
+
 export async function testEvolutionConnection(): Promise<{
   ok: boolean;
   detail: string;

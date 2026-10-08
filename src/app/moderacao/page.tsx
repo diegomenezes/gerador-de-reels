@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { ModerationPanel } from "@/components/ModerationPanel";
 import { prisma } from "@/lib/db";
+import { checkEvolutionHealth } from "@/lib/evolution";
 import {
   ensureModerationDefaults,
   registerModerationWebhook,
@@ -25,7 +26,7 @@ export default async function ModeracaoPage() {
     }
   }
 
-  const [settings, domains, whitelist, events] = await Promise.all([
+  const [settings, domains, whitelist, events, evolution] = await Promise.all([
     prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
     prisma.blockedDomain.findMany({ orderBy: { domain: "asc" } }),
     prisma.whitelistLink.findMany({ orderBy: { createdAt: "desc" } }),
@@ -33,6 +34,9 @@ export default async function ModeracaoPage() {
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
+    prisma.group
+      .findFirst({ where: { active: true }, select: { remoteJid: true } })
+      .then((group) => checkEvolutionHealth(group?.remoteJid)),
   ]);
 
   return (
@@ -63,6 +67,7 @@ export default async function ModeracaoPage() {
         }))}
         webhookMessage={webhookMessage}
         webhookUrl={webhookUrl}
+        evolution={evolution}
       />
     </div>
   );

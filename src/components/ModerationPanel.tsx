@@ -25,6 +25,7 @@ type Props = {
   events: EventRow[];
   webhookMessage: string;
   webhookUrl: string;
+  evolution: { ok: boolean; title: string; detail: string };
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -45,6 +46,7 @@ export function ModerationPanel({
   events,
   webhookMessage,
   webhookUrl,
+  evolution,
 }: Props) {
   const router = useRouter();
   const [groupJid, setGroupJid] = useState(notifyNumber);
@@ -72,6 +74,29 @@ export function ModerationPanel({
 
   return (
     <div className="space-y-6">
+      <section
+        className="card flex items-start gap-3 p-4"
+        style={
+          evolution.ok
+            ? undefined
+            : { background: "#fef2f2", borderColor: "rgba(185, 28, 28, 0.35)" }
+        }
+      >
+        <span
+          className="mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full"
+          style={{ background: evolution.ok ? "var(--accent)" : "#dc2626" }}
+          aria-hidden
+        />
+        <div>
+          <p
+            className="font-semibold"
+            style={evolution.ok ? undefined : { color: "#b91c1c" }}
+          >
+            {evolution.title}
+          </p>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">{evolution.detail}</p>
+        </div>
+      </section>
       <section className="card space-y-4 p-5">
         <div>
           <h3 className="font-semibold">Modo</h3>
