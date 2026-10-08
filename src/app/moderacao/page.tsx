@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { ModerationPanel } from "@/components/ModerationPanel";
 import { prisma } from "@/lib/db";
-import { checkEvolutionHealth, fetchLatestGroupMessage } from "@/lib/evolution";
+import { checkEvolutionHealth } from "@/lib/evolution";
 import {
   ensureModerationDefaults,
   registerModerationWebhook,
@@ -37,10 +37,6 @@ export default async function ModeracaoPage() {
     }),
     checkEvolutionHealth(groups.find((group) => group.active)?.remoteJid),
   ]);
-  const latestMessages = await Promise.all(
-    groups.map((group) => fetchLatestGroupMessage(group)),
-  );
-
   return (
     <div className="space-y-6">
       <section>
@@ -70,7 +66,6 @@ export default async function ModeracaoPage() {
         webhookMessage={webhookMessage}
         webhookUrl={webhookUrl}
         evolution={evolution}
-        latestMessages={latestMessages}
       />
     </div>
   );

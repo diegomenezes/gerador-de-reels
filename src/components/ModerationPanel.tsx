@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Domain = { id: string; domain: string };
 type Whitelist = { id: string; url: string };
@@ -16,6 +16,17 @@ type EventRow = {
   messageAt: string;
 };
 
+type LatestMessage = {
+  remoteJid: string;
+  name: string;
+  active: boolean;
+  at: string | null;
+  preview: string;
+  fromMe: boolean;
+  author: string | null;
+  error: string | null;
+};
+
 type Props = {
   enabled: boolean;
   deleteMode: boolean;
@@ -26,16 +37,6 @@ type Props = {
   webhookMessage: string;
   webhookUrl: string;
   evolution: { ok: boolean; title: string; detail: string };
-  latestMessages: {
-    remoteJid: string;
-    name: string;
-    active: boolean;
-    at: string | null;
-    preview: string;
-    fromMe: boolean;
-    author: string | null;
-    error: string | null;
-  }[];
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -57,9 +58,12 @@ export function ModerationPanel({
   webhookMessage,
   webhookUrl,
   evolution,
-  latestMessages,
 }: Props) {
   const router = useRouter();
+  const [latestMessages, setLatestMessages] = useState<LatestMessage[] | null>(
+    null,
+  );
+  const [latestError, setLatestError] = useState<string | null>(null);
   const [groupJid, setGroupJid] = useState(notifyNumber);
   const [isEnabled, setIsEnabled] = useState(enabled);
   const [willDelete, setWillDelete] = useState(deleteMode);
@@ -68,6 +72,31 @@ export function ModerationPanel({
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/moderation/latest")
+      .then(async (res) => {
+        const data = (await res.json()) as { error?: string; latestMessages?: LatestMessage[] };
+        if (!res.ok) {
+          throw new Error(data.error ?? "Não consegui ler as últimas mensagens.");
+        }
+        return data.latestMessages ?? [];
+      })
+      .then((rows) => {
+        if (!cancelled) setLatestMessages(rows);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setLatestError(
+            err instanceof Error ? err.message : "Não consegui ler as últimas mensagens.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function run(key: string, fn: () => Promise<void>) {
     setLoading(key);
@@ -111,12 +140,20 @@ export function ModerationPanel({
               Últimas mensagens dos grupos
             </summary>
             <ul className="mt-3 space-y-3">
-              {latestMessages.length === 0 && (
+              {latestError && (
+                <li className="text-sm text-[var(--ink-soft)]">{latestError}</li>
+              )}
+              {latestMessages === null && !latestError && (
+                <li className="text-sm text-[var(--ink-soft)]">
+                  Lendo as últimas mensagens…
+                </li>
+              )}
+              {latestMessages?.length === 0 && (
                 <li className="text-sm text-[var(--ink-soft)]">
                   Nenhum grupo cadastrado.
                 </li>
               )}
-              {latestMessages.map((item) => (
+              {latestMessages?.map((item) => (
                 <li key={item.remoteJid} className="text-sm">
                   <p className="font-medium">
                     {item.name}

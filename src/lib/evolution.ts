@@ -222,11 +222,14 @@ export type GroupLatestMessage = {
   error: string | null;
 };
 
-export async function fetchLatestGroupMessage(input: {
-  name: string;
-  remoteJid: string;
-  active: boolean;
-}): Promise<GroupLatestMessage> {
+export async function fetchLatestGroupMessage(
+  input: {
+    name: string;
+    remoteJid: string;
+    active: boolean;
+  },
+  timeoutMs = 20000,
+): Promise<GroupLatestMessage> {
   const base = {
     name: input.name,
     remoteJid: input.remoteJid,
@@ -241,7 +244,7 @@ export async function fetchLatestGroupMessage(input: {
   try {
     const { baseUrl, apiKey, instance } = getConfig();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(`${baseUrl}/chat/findMessages/${instance}`, {
         method: "POST",
@@ -489,14 +492,22 @@ function readWebhook(payload: unknown): EvolutionWebhook {
 
 export async function findWebhook(): Promise<EvolutionWebhook | null> {
   const { baseUrl, apiKey, instance } = getConfig();
-  const res = await fetch(`${baseUrl}/webhook/find/${instance}`, {
-    headers: { apikey: apiKey },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    throw new Error(`Falha ao ler webhook: ${await res.text()}`);
+  try {
+    const res = await fetchEvolution(
+      `${baseUrl}/webhook/find/${instance}`,
+      apiKey,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`Falha ao ler webhook: ${await res.text()}`);
+    }
+    return readWebhook(await res.json());
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("A Evolution demorou demais para responder.");
+    }
+    throw err;
   }
-  return readWebhook(await res.json());
 }
 
 export async function setWebhook(input: {
@@ -504,25 +515,37 @@ export async function setWebhook(input: {
   events: string[];
 }): Promise<void> {
   const { baseUrl, apiKey, instance } = getConfig();
-  const res = await fetch(`${baseUrl}/webhook/set/${instance}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: apiKey,
-    },
-    body: JSON.stringify({
-      webhook: {
-        enabled: true,
-        url: input.url,
-        headers: { apikey: apiKey },
-        webhookByEvents: false,
-        webhookBase64: false,
-        events: input.events,
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${baseUrl}/webhook/set/${instance}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
       },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Falha ao registrar webhook: ${await res.text()}`);
+      body: JSON.stringify({
+        webhook: {
+          enabled: true,
+          url: input.url,
+          headers: { apikey: apiKey },
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: input.events,
+        },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Falha ao registrar webhook: ${await res.text()}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("A Evolution demorou demais para responder.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
