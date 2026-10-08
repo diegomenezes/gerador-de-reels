@@ -253,15 +253,34 @@ export async function processModerationMessage(message: IncomingMessage) {
 
   let action = "notified";
   let detail: string | null = null;
+  let deletedForEveryone = false;
+
+  if (settings.deleteMode) {
+    try {
+      await deleteMessageForEveryone({
+        id: message.waMessageId,
+        remoteJid: message.remoteJid,
+        participants: [message.participant, message.participantAlt],
+      });
+      deletedForEveryone = true;
+      action = "deleted";
+    } catch (err) {
+      detail = err instanceof Error ? err.message : String(err);
+      action = "delete_failed";
+    }
+  }
+
+  const outcome = !settings.deleteMode
+    ? "A mensagem não foi apagada. O modo apagar está desligado."
+    : deletedForEveryone
+      ? "A mensagem foi apagada para todos no grupo."
+      : `A mensagem não foi apagada para todos. ${detail}`;
 
   const notifyGroup = toGroupJid(settings.notifyNumber);
   if (notifyGroup) {
     const when = message.timestamp.toLocaleString("pt-BR", {
       timeZone: "America/Sao_Paulo",
     });
-    const mode = settings.deleteMode
-      ? "Modo: avisar e apagar."
-      : "Modo: só aviso. A mensagem não foi apagada.";
     try {
       await sendTextMessage(
         notifyGroup,
@@ -273,33 +292,25 @@ export async function processModerationMessage(message: IncomingMessage) {
           "",
           message.text,
           "",
-          mode,
+          outcome,
         ].join("\n"),
       );
     } catch (err) {
-      detail = err instanceof Error ? err.message : String(err);
-      action = "notify_failed";
-    }
-  } else {
-    detail = notifyGroup === ""
-      ? "Grupo de aviso não configurado"
-      : "ID do grupo de aviso inválido";
-    action = "notify_failed";
-  }
-
-  if (settings.deleteMode) {
-    try {
-      await deleteMessageForEveryone({
-        id: message.waMessageId,
-        remoteJid: message.remoteJid,
-        participant: message.participant,
-      });
-      action = action === "notify_failed" ? "deleted_notify_failed" : "deleted";
-    } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       detail = detail ? `${detail} | ${reason}` : reason;
-      if (action === "notified") action = "delete_failed";
+      action = deletedForEveryone
+        ? "deleted_notify_failed"
+        : action === "delete_failed"
+          ? "delete_failed"
+          : "notify_failed";
     }
+  } else {
+    const reason =
+      notifyGroup === ""
+        ? "Grupo de aviso não configurado"
+        : "ID do grupo de aviso inválido";
+    detail = detail ? `${detail} | ${reason}` : reason;
+    action = deletedForEveryone ? "deleted_notify_failed" : "notify_failed";
   }
 
   await prisma.moderationEvent.update({

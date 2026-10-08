@@ -209,7 +209,8 @@ export function ModerationPanel({
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Começa só avisando. Apagar fica desligado até você ligar.
             Admins do grupo ficam de fora, assim como o número conectado na
-            Evolution.
+            Evolution. Com apagar ligado, a mensagem sai para todos no grupo.
+            Esse número precisa ser admin do grupo.
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm">

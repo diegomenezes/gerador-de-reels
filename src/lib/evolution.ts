@@ -444,31 +444,84 @@ export async function sendTextMessage(
   }
 }
 
+function revokeNamesAuthor(body: string, messageId: string): boolean {
+  try {
+    const json = JSON.parse(body) as {
+      message?: {
+        protocolMessage?: {
+          type?: string | number;
+          key?: { id?: string; participant?: string };
+        };
+      };
+    };
+    const protocol = json.message?.protocolMessage;
+    if (!protocol?.key) return false;
+    const type = protocol.type;
+    const isRevoke = type === "REVOKE" || type === 0 || type === "0";
+    if (!isRevoke) return false;
+    if (protocol.key.id && protocol.key.id !== messageId) return false;
+    return (
+      typeof protocol.key.participant === "string" &&
+      protocol.key.participant.includes("@")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteMessageForEveryone(input: {
   id: string;
   remoteJid: string;
-  participant: string | null;
+  participants: Array<string | null | undefined>;
 }): Promise<void> {
-  const { baseUrl, apiKey, instance } = getConfig();
-  const res = await fetch(
-    `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: apiKey,
-      },
-      body: JSON.stringify({
-        id: input.id,
-        remoteJid: input.remoteJid,
-        fromMe: false,
-        participant: input.participant,
-      }),
-    },
-  );
-  if (!res.ok) {
-    throw new Error(`Falha ao apagar mensagem: ${await res.text()}`);
+  const candidates = [
+    ...new Set(
+      input.participants.filter(
+        (value): value is string =>
+          typeof value === "string" && value.includes("@"),
+      ),
+    ),
+  ];
+  if (candidates.length === 0) {
+    throw new Error(
+      "A mensagem chegou sem o autor do grupo, então não dá para apagar para todos.",
+    );
   }
+
+  const { baseUrl, apiKey, instance } = getConfig();
+  let lastError = "Falha ao apagar a mensagem para todos.";
+
+  for (const participant of candidates) {
+    const res = await fetch(
+      `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          id: input.id,
+          remoteJid: input.remoteJid,
+          fromMe: false,
+          participant,
+        }),
+      },
+    );
+    const text = await res.text();
+    if (!res.ok) {
+      lastError = `Falha ao apagar mensagem: ${text.slice(0, 300)}`;
+      continue;
+    }
+    if (!revokeNamesAuthor(text, input.id)) {
+      lastError =
+        "A Evolution respondeu, mas o pedido não identificou o autor. Sem isso o WhatsApp não apaga para todos.";
+      continue;
+    }
+    return;
+  }
+
+  throw new Error(lastError);
 }
 
 export type EvolutionWebhook = {
