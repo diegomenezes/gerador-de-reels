@@ -228,7 +228,7 @@ export async function fetchLatestGroupMessage(
     remoteJid: string;
     active: boolean;
   },
-  timeoutMs = 20000,
+  timeoutMs = 50000,
 ): Promise<GroupLatestMessage> {
   const base = {
     name: input.name,
@@ -281,8 +281,14 @@ export async function fetchLatestGroupMessage(
     } finally {
       clearTimeout(timer);
     }
-  } catch {
-    return { ...base, error: "Não consegui ler a última mensagem." };
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    return {
+      ...base,
+      error: aborted
+        ? "A Evolution demorou demais para responder."
+        : "Não consegui ler a última mensagem.",
+    };
   }
 }
 

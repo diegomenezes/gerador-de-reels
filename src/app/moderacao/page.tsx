@@ -66,6 +66,11 @@ export default async function ModeracaoPage() {
         webhookMessage={webhookMessage}
         webhookUrl={webhookUrl}
         evolution={evolution}
+        groups={groups.map((group) => ({
+          remoteJid: group.remoteJid,
+          name: group.name,
+          active: group.active,
+        }))}
       />
     </div>
   );
