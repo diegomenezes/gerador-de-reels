@@ -26,6 +26,16 @@ type Props = {
   webhookMessage: string;
   webhookUrl: string;
   evolution: { ok: boolean; title: string; detail: string };
+  latestMessages: {
+    remoteJid: string;
+    name: string;
+    active: boolean;
+    at: string | null;
+    preview: string;
+    fromMe: boolean;
+    author: string | null;
+    error: string | null;
+  }[];
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -47,6 +57,7 @@ export function ModerationPanel({
   webhookMessage,
   webhookUrl,
   evolution,
+  latestMessages,
 }: Props) {
   const router = useRouter();
   const [groupJid, setGroupJid] = useState(notifyNumber);
@@ -87,7 +98,7 @@ export function ModerationPanel({
           style={{ background: evolution.ok ? "var(--accent)" : "#dc2626" }}
           aria-hidden
         />
-        <div>
+        <div className="min-w-0 flex-1">
           <p
             className="font-semibold"
             style={evolution.ok ? undefined : { color: "#b91c1c" }}
@@ -95,6 +106,34 @@ export function ModerationPanel({
             {evolution.title}
           </p>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">{evolution.detail}</p>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Últimas mensagens dos grupos
+            </summary>
+            <ul className="mt-3 space-y-3">
+              {latestMessages.length === 0 && (
+                <li className="text-sm text-[var(--ink-soft)]">
+                  Nenhum grupo cadastrado.
+                </li>
+              )}
+              {latestMessages.map((item) => (
+                <li key={item.remoteJid} className="text-sm">
+                  <p className="font-medium">
+                    {item.name}
+                    {item.active ? "" : " · pausado"}
+                  </p>
+                  <p className="text-[var(--ink-soft)]">
+                    {item.at ?? "Sem data"}
+                    {item.fromMe ? " · enviada pela Evolution" : ""}
+                    {item.author && !item.fromMe ? ` · ${item.author}` : ""}
+                  </p>
+                  <p className="mt-1 break-words">
+                    {item.error ?? item.preview}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </details>
         </div>
       </section>
       <section className="card space-y-4 p-5">

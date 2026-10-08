@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { ModerationPanel } from "@/components/ModerationPanel";
 import { prisma } from "@/lib/db";
-import { checkEvolutionHealth } from "@/lib/evolution";
+import { checkEvolutionHealth, fetchLatestGroupMessage } from "@/lib/evolution";
 import {
   ensureModerationDefaults,
   registerModerationWebhook,
@@ -26,6 +26,7 @@ export default async function ModeracaoPage() {
     }
   }
 
+  const groups = await prisma.group.findMany({ orderBy: { name: "asc" } });
   const [settings, domains, whitelist, events, evolution] = await Promise.all([
     prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
     prisma.blockedDomain.findMany({ orderBy: { domain: "asc" } }),
@@ -34,10 +35,11 @@ export default async function ModeracaoPage() {
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
-    prisma.group
-      .findFirst({ where: { active: true }, select: { remoteJid: true } })
-      .then((group) => checkEvolutionHealth(group?.remoteJid)),
+    checkEvolutionHealth(groups.find((group) => group.active)?.remoteJid),
   ]);
+  const latestMessages = await Promise.all(
+    groups.map((group) => fetchLatestGroupMessage(group)),
+  );
 
   return (
     <div className="space-y-6">
@@ -68,6 +70,7 @@ export default async function ModeracaoPage() {
         webhookMessage={webhookMessage}
         webhookUrl={webhookUrl}
         evolution={evolution}
+        latestMessages={latestMessages}
       />
     </div>
   );
