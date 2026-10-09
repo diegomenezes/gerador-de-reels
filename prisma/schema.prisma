@@ -86,11 +86,13 @@ model Script {
 }
 
 model ModerationSettings {
-  id           String   @id @default("default")
-  enabled      Boolean  @default(true)
-  deleteMode   Boolean  @default(false)
-  notifyNumber String   @default("")
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default("default")
+  enabled        Boolean  @default(true)
+  deleteMode     Boolean  @default(false)
+  notifyNumber   String   @default("")
+  announceDelete Boolean  @default(false)
+  announceText   String   @default("*Mensagem apagada automaticamente* pelo BOT Moderador. Se você acha que foi um engano comunique um dos admins, leia as regras do grupo na descrição.")
+  updatedAt      DateTime @updatedAt
 }
 
 model BlockedDomain {

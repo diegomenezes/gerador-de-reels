@@ -270,6 +270,20 @@ export async function processModerationMessage(message: IncomingMessage) {
     }
   }
 
+  if (deletedForEveryone && settings.announceDelete) {
+    const announcement = settings.announceText.trim();
+    if (!announcement) {
+      detail = "Mensagem de moderação vazia.";
+    } else {
+      try {
+        await sendTextMessage(group.remoteJid, announcement);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        detail = `Não consegui avisar no grupo: ${reason}`;
+      }
+    }
+  }
+
   const outcome = !settings.deleteMode
     ? "A mensagem não foi apagada. O modo apagar está desligado."
     : deletedForEveryone

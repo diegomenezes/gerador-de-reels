@@ -44,6 +44,8 @@ type Props = {
   webhookUrl: string;
   evolution: { ok: boolean; title: string; detail: string };
   groups: GroupRef[];
+  announceDelete: boolean;
+  announceText: string;
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -66,6 +68,8 @@ export function ModerationPanel({
   webhookUrl,
   evolution,
   groups,
+  announceDelete,
+  announceText,
 }: Props) {
   const router = useRouter();
   const [latestByJid, setLatestByJid] = useState<Record<string, LatestMessage>>(
@@ -74,6 +78,8 @@ export function ModerationPanel({
   const [groupJid, setGroupJid] = useState(notifyNumber);
   const [isEnabled, setIsEnabled] = useState(enabled);
   const [willDelete, setWillDelete] = useState(deleteMode);
+  const [willAnnounce, setWillAnnounce] = useState(announceDelete);
+  const [announcement, setAnnouncement] = useState(announceText);
   const [domain, setDomain] = useState("");
   const [invite, setInvite] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
@@ -229,6 +235,29 @@ export function ModerationPanel({
           />
           Apagar a mensagem no grupo (além de avisar)
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={willAnnounce}
+            onChange={(e) => setWillAnnounce(e.target.checked)}
+          />
+          Avisar no grupo que a mensagem foi apagada
+        </label>
+        <div className="space-y-1">
+          <label className="text-sm text-[var(--ink-soft)]">
+            Mensagem depois de apagar
+          </label>
+          <textarea
+            className="field min-h-24"
+            value={announcement}
+            onChange={(e) => setAnnouncement(e.target.value)}
+            maxLength={1000}
+          />
+          <p className="text-sm text-[var(--ink-soft)]">
+            Sai no grupo em que a mensagem foi apagada, só com esta opção ligada.
+            *assim* fica em negrito no WhatsApp.
+          </p>
+        </div>
         <div className="space-y-1">
           <label className="text-sm text-[var(--ink-soft)]">
             Grupo que recebe o aviso
@@ -258,6 +287,8 @@ export function ModerationPanel({
                     enabled: isEnabled,
                     deleteMode: willDelete,
                     notifyNumber: groupJid,
+                    announceDelete: willAnnounce,
+                    announceText: announcement,
                   }),
                 });
                 const data = await res.json();

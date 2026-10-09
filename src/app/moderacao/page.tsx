@@ -51,6 +51,8 @@ export default async function ModeracaoPage() {
         enabled={settings.enabled}
         deleteMode={settings.deleteMode}
         notifyNumber={settings.notifyNumber}
+        announceDelete={settings.announceDelete}
+        announceText={settings.announceText}
         domains={domains}
         whitelist={whitelist}
         events={events.map((event) => ({
