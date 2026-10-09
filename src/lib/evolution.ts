@@ -659,9 +659,6 @@ function revokeMatchesOwnMessage(body: string, messageId: string): boolean {
   }
 }
 
-  throw new Error(lastError);
-}
-
 export type EvolutionWebhook = {
   enabled: boolean;
   url: string;
