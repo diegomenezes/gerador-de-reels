@@ -431,6 +431,7 @@ export type SentMessage = {
 export async function sendTextMessage(
   number: string,
   text: string,
+  options?: { delay?: number },
 ): Promise<SentMessage> {
   const { baseUrl, apiKey, instance } = getConfig();
   const destination = number.trim();
@@ -443,7 +444,12 @@ export async function sendTextMessage(
       "Content-Type": "application/json",
       apikey: apiKey,
     },
-    body: JSON.stringify({ number: target || destination, text }),
+    body: JSON.stringify({
+      number: target || destination,
+      text,
+      linkPreview: false,
+      ...(options?.delay ? { delay: options.delay } : {}),
+    }),
   });
   const body = await res.text();
   if (!res.ok) {
@@ -454,6 +460,15 @@ export async function sendTextMessage(
     json = JSON.parse(body) as Record<string, unknown>;
   } catch {
     json = {};
+  }
+  const sentMessage = (json.message ?? {}) as Record<string, unknown>;
+  const extended = sentMessage.extendedTextMessage as { text?: string } | undefined;
+  const sentText =
+    (typeof sentMessage.conversation === "string" && sentMessage.conversation) ||
+    (typeof extended?.text === "string" && extended.text) ||
+    "";
+  if (!sentText.trim()) {
+    throw new Error("A Evolution enviou a mensagem sem o texto.");
   }
   const key = (json.key ?? {}) as Record<string, unknown>;
   const id = typeof key.id === "string" ? key.id : "";

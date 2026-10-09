@@ -276,7 +276,7 @@ export async function processModerationMessage(message: IncomingMessage) {
       detail = "Mensagem de moderação vazia.";
     } else {
       try {
-        await sendTextMessage(group.remoteJid, announcement);
+        await sendTextMessage(group.remoteJid, announcement, { delay: 1500 });
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         detail = `Não consegui avisar no grupo: ${reason}`;
