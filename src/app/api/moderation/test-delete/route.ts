@@ -15,6 +15,13 @@ export async function POST() {
       { status: 400 },
     );
   }
+  const announcement = settings.announceText.trim();
+  if (!announcement) {
+    return NextResponse.json(
+      { error: "Escreva a mensagem que o bot envia depois de apagar." },
+      { status: 400 },
+    );
+  }
 
   let sent;
   try {
@@ -33,18 +40,27 @@ export async function POST() {
 
   await new Promise((resolve) => setTimeout(resolve, 4000));
 
+  let result: "gone" | "unconfirmed";
   try {
-    const result = await deleteOwnGroupMessage({
+    result = await deleteOwnGroupMessage({
       id: sent.id,
       remoteJid: sent.remoteJid || groupJid,
       participant: sent.participant,
-    });
-    return NextResponse.json({
-      ok: true,
-      confirmed: result === "gone",
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: detail }, { status: 502 });
   }
+
+  try {
+    await sendTextMessage(groupJid, announcement, { delay: 1500 });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: detail }, { status: 502 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    confirmed: result === "gone",
+  });
 }

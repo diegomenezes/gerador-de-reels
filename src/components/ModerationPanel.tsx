@@ -334,8 +334,8 @@ export function ModerationPanel({
                 }
                 setInfo(
                   data.confirmed
-                    ? "Mensagem enviada no grupo de aviso e apagada para todos."
-                    : "A Evolution aceitou apagar. Confira no grupo de aviso se a mensagem sumiu.",
+                    ? "A frase de teste foi apagada para todos e o aviso de moderação foi enviado em seguida."
+                    : "A Evolution aceitou apagar e o aviso de moderação foi enviado. Confira no grupo de aviso se a frase de teste sumiu.",
                 );
               })
             }
