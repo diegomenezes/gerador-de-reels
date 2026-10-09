@@ -444,6 +444,46 @@ export async function sendTextMessage(
   }
 }
 
+async function groupMessageStillVisible(
+  remoteJid: string,
+  messageId: string,
+): Promise<boolean> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(`${baseUrl}/chat/findMessages/${instance}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        where: { key: { remoteJid, id: messageId } },
+        page: 1,
+        offset: 1,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return true;
+    const rows = unwrapList(await res.json());
+    const raw = rows.find((row) => {
+      const key = (row.key ?? {}) as Record<string, unknown>;
+      return key.id === messageId;
+    });
+    if (!raw) return false;
+    const key = (raw.key ?? {}) as Record<string, unknown>;
+    if (key.deleted === true) return false;
+    const stub = raw.messageStubType;
+    if (stub === "REVOKE" || stub === 1) return false;
+    return true;
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function revokeNamesAuthor(body: string, messageId: string): boolean {
   try {
     const json = JSON.parse(body) as {
@@ -516,6 +556,12 @@ export async function deleteMessageForEveryone(input: {
     if (!revokeNamesAuthor(text, input.id)) {
       lastError =
         "A Evolution respondeu, mas o pedido não identificou o autor. Sem isso o WhatsApp não apaga para todos.";
+      continue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    if (await groupMessageStillVisible(input.remoteJid, input.id)) {
+      lastError =
+        "A Evolution aceitou apagar para todos, mas o WhatsApp manteve a mensagem no grupo.";
       continue;
     }
     return;
