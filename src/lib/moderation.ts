@@ -176,6 +176,35 @@ async function rememberAdminLinks(urls: string[]) {
   }
 }
 
+export async function rememberGroupMessage(message: IncomingMessage) {
+  const group = await prisma.group.findUnique({
+    where: { remoteJid: message.remoteJid },
+  });
+  if (!group) return;
+
+  const author = message.participant || message.pushName;
+  await prisma.message.upsert({
+    where: {
+      groupId_waMessageId: {
+        groupId: group.id,
+        waMessageId: message.waMessageId,
+      },
+    },
+    create: {
+      groupId: group.id,
+      waMessageId: message.waMessageId,
+      author,
+      text: message.text,
+      timestamp: message.timestamp,
+    },
+    update: {
+      author,
+      text: message.text,
+      timestamp: message.timestamp,
+    },
+  });
+}
+
 export async function processModerationMessage(message: IncomingMessage) {
   await ensureModerationDefaults();
   await prisma.adminLink.deleteMany({ where: { expiresAt: { lt: new Date() } } });

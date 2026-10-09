@@ -1,6 +1,5 @@
 import { format } from "date-fns";
 import { prisma } from "./db";
-import { fetchGroupMessages } from "./evolution";
 import { compactMessages, sameReelTheme } from "./filter";
 import { readHookModels } from "./hook-models";
 import {
@@ -62,48 +61,14 @@ export async function runDailyPipeline(
       throw new Error("Nenhum grupo ativo cadastrado");
     }
 
-    for (const [index, group] of groups.entries()) {
-      await setStage(
-        job.id,
-        `Lendo grupo ${index + 1}/${groups.length}: ${group.name}`,
-        { messagesIn },
-      );
-
-      const remoteMessages = await fetchGroupMessages({
-        remoteJid: group.remoteJid,
-        since,
-        maxPages: 4,
-      });
-      messagesIn += remoteMessages.length;
-
-      for (const msg of remoteMessages) {
-        await prisma.message.upsert({
-          where: {
-            groupId_waMessageId: {
-              groupId: group.id,
-              waMessageId: msg.waMessageId,
-            },
-          },
-          create: {
-            groupId: group.id,
-            waMessageId: msg.waMessageId,
-            author: msg.author,
-            text: msg.text,
-            timestamp: msg.timestamp,
-          },
-          update: {
-            text: msg.text,
-            author: msg.author,
-            timestamp: msg.timestamp,
-          },
-        });
-      }
-    }
-
+    messagesIn = await prisma.message.count({
+      where: { timestamp: { gte: since }, group: { active: true } },
+    });
+    await setStage(job.id, "Lendo mensagens recebidas...", { messagesIn });
     await setStage(job.id, "Filtrando dúvidas...", { messagesIn });
 
     const recent = await prisma.message.findMany({
-      where: { timestamp: { gte: since } },
+      where: { timestamp: { gte: since }, group: { active: true } },
       select: { text: true },
       orderBy: { timestamp: "desc" },
       take: 5000,

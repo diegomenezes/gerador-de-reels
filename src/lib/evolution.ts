@@ -600,12 +600,6 @@ export async function deleteMessageForEveryone(input: {
         "A Evolution respondeu, mas o pedido não identificou o autor. Sem isso o WhatsApp não apaga para todos.";
       continue;
     }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    if ((await groupMessagePresence(input.remoteJid, input.id)) !== "gone") {
-      lastError =
-        "A Evolution aceitou apagar para todos, mas o WhatsApp manteve a mensagem no grupo.";
-      continue;
-    }
     return;
   }
 
@@ -716,6 +710,36 @@ export async function findWebhook(): Promise<EvolutionWebhook | null> {
       throw new Error("A Evolution demorou demais para responder.");
     }
     throw err;
+  }
+}
+
+export async function disableFullHistorySync(): Promise<void> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${baseUrl}/settings/set/${instance}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        syncFullHistory: false,
+        groupsIgnore: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Falha ao ajustar a Evolution: ${await res.text()}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("A Evolution demorou demais para responder.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

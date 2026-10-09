@@ -1,5 +1,9 @@
-import { NextResponse } from "next/server";
-import { parseEvolutionWebhook, processModerationMessage } from "@/lib/moderation";
+import { after, NextResponse } from "next/server";
+import {
+  parseEvolutionWebhook,
+  processModerationMessage,
+  rememberGroupMessage,
+} from "@/lib/moderation";
 
 function authorized(request: Request): boolean {
   const cron = process.env.CRON_SECRET;
@@ -18,9 +22,19 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const messages = parseEvolutionWebhook(body);
-  const results = [];
-  for (const message of messages) {
-    results.push(await processModerationMessage(message));
-  }
-  return NextResponse.json({ ok: true, count: messages.length, results });
+  after(async () => {
+    for (const message of messages) {
+      try {
+        await rememberGroupMessage(message);
+      } catch (err) {
+        console.error("[moderacao] gravar mensagem:", err);
+      }
+      try {
+        await processModerationMessage(message);
+      } catch (err) {
+        console.error("[moderacao] processar mensagem:", err);
+      }
+    }
+  });
+  return NextResponse.json({ ok: true, count: messages.length });
 }
