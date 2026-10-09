@@ -422,10 +422,16 @@ export function senderIsGroupAdmin(
   );
 }
 
+export type SentMessage = {
+  id: string;
+  remoteJid: string;
+  participant: string | null;
+};
+
 export async function sendTextMessage(
   number: string,
   text: string,
-): Promise<void> {
+): Promise<SentMessage> {
   const { baseUrl, apiKey, instance } = getConfig();
   const destination = number.trim();
   const target = destination.toLowerCase().endsWith("@g.us")
@@ -439,15 +445,36 @@ export async function sendTextMessage(
     },
     body: JSON.stringify({ number: target || destination, text }),
   });
+  const body = await res.text();
   if (!res.ok) {
-    throw new Error(`Falha ao avisar no WhatsApp: ${await res.text()}`);
+    throw new Error(`Falha ao avisar no WhatsApp: ${body.slice(0, 300)}`);
   }
+  let json: Record<string, unknown> = {};
+  try {
+    json = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    json = {};
+  }
+  const key = (json.key ?? {}) as Record<string, unknown>;
+  const id = typeof key.id === "string" ? key.id : "";
+  if (!id) {
+    throw new Error("A Evolution enviou, mas não devolveu o identificador da mensagem.");
+  }
+  const participant =
+    (typeof json.participant === "string" && json.participant) ||
+    (typeof key.participant === "string" && key.participant) ||
+    null;
+  return {
+    id,
+    remoteJid: typeof key.remoteJid === "string" ? key.remoteJid : target || destination,
+    participant,
+  };
 }
 
-async function groupMessageStillVisible(
+async function groupMessagePresence(
   remoteJid: string,
   messageId: string,
-): Promise<boolean> {
+): Promise<"visible" | "gone" | "unknown"> {
   const { baseUrl, apiKey, instance } = getConfig();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
@@ -465,20 +492,20 @@ async function groupMessageStillVisible(
       }),
       signal: controller.signal,
     });
-    if (!res.ok) return true;
+    if (!res.ok) return "unknown";
     const rows = unwrapList(await res.json());
     const raw = rows.find((row) => {
       const key = (row.key ?? {}) as Record<string, unknown>;
       return key.id === messageId;
     });
-    if (!raw) return false;
+    if (!raw) return "gone";
     const key = (raw.key ?? {}) as Record<string, unknown>;
-    if (key.deleted === true) return false;
+    if (key.deleted === true) return "gone";
     const stub = raw.messageStubType;
-    if (stub === "REVOKE" || stub === 1) return false;
-    return true;
+    if (stub === "REVOKE" || stub === 1) return "gone";
+    return "visible";
   } catch {
-    return true;
+    return "unknown";
   } finally {
     clearTimeout(timer);
   }
@@ -559,13 +586,78 @@ export async function deleteMessageForEveryone(input: {
       continue;
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    if (await groupMessageStillVisible(input.remoteJid, input.id)) {
+    if ((await groupMessagePresence(input.remoteJid, input.id)) !== "gone") {
       lastError =
         "A Evolution aceitou apagar para todos, mas o WhatsApp manteve a mensagem no grupo.";
       continue;
     }
     return;
   }
+
+  throw new Error(lastError);
+}
+
+export async function deleteOwnGroupMessage(input: {
+  id: string;
+  remoteJid: string;
+  participant?: string | null;
+}): Promise<"gone" | "unconfirmed"> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const payload: Record<string, unknown> = {
+    id: input.id,
+    remoteJid: input.remoteJid,
+    fromMe: true,
+  };
+  if (input.participant) payload.participant = input.participant;
+  const res = await fetch(
+    `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Falha ao apagar mensagem: ${text.slice(0, 300)}`);
+  }
+  if (!revokeNamesAuthor(text, input.id) && !revokeMatchesOwnMessage(text, input.id)) {
+    throw new Error(
+      "A Evolution respondeu, mas o pedido não foi de apagar para todos.",
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  const presence = await groupMessagePresence(input.remoteJid, input.id);
+  if (presence === "visible") {
+    throw new Error(
+      "A mensagem de teste foi enviada, mas continua no grupo. O WhatsApp não apagou.",
+    );
+  }
+  return presence === "gone" ? "gone" : "unconfirmed";
+}
+
+function revokeMatchesOwnMessage(body: string, messageId: string): boolean {
+  try {
+    const json = JSON.parse(body) as {
+      message?: {
+        protocolMessage?: {
+          type?: string | number;
+          key?: { id?: string; fromMe?: boolean };
+        };
+      };
+    };
+    const protocol = json.message?.protocolMessage;
+    if (!protocol?.key) return false;
+    const type = protocol.type;
+    const isRevoke = type === "REVOKE" || type === 0 || type === "0";
+    return isRevoke && protocol.key.id === messageId && protocol.key.fromMe === true;
+  } catch {
+    return false;
+  }
+}
 
   throw new Error(lastError);
 }

@@ -285,6 +285,32 @@ export function ModerationPanel({
           >
             {loading === "test-message" ? "Enviando..." : "DISPARAR MENSAGEM TESTE"}
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={!!loading}
+            onClick={() =>
+              run("test-delete", async () => {
+                const res = await fetch("/api/moderation/test-delete", {
+                  method: "POST",
+                });
+                const data = (await res.json().catch(() => ({}))) as {
+                  error?: string;
+                  confirmed?: boolean;
+                };
+                if (!res.ok) {
+                  throw new Error(data.error || "Falha ao testar a exclusão");
+                }
+                setInfo(
+                  data.confirmed
+                    ? "Mensagem enviada no grupo de aviso e apagada para todos."
+                    : "A Evolution aceitou apagar. Confira no grupo de aviso se a mensagem sumiu.",
+                );
+              })
+            }
+          >
+            {loading === "test-delete" ? "Testando..." : "TESTAR APAGAR"}
+          </button>
         </div>
       </section>
 
