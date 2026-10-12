@@ -344,9 +344,19 @@ function addJid(ids: Set<string>, value: unknown) {
   ids.add(canonicalJid(value));
 }
 
+function phoneDigits(value: unknown): string | null {
+  if (typeof value === "number") return phoneDigits(String(value));
+  if (typeof value !== "string") return null;
+  if (value.toLowerCase().endsWith("@lid")) return null;
+  const local = value.split("@")[0]?.split(":")[0] ?? "";
+  const digits = local.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return null;
+  return digits;
+}
+
 const adminCache = new Map<
   string,
-  { until: number; ids: Set<string> | null }
+  { until: number; ids: Set<string> | null; phones: Map<string, string> }
 >();
 
 function readParticipants(payload: unknown): Record<string, unknown>[] {
@@ -387,12 +397,33 @@ export async function fetchGroupAdminIds(
       { headers: { apikey: apiKey }, signal: controller.signal },
     );
     if (!res.ok) {
-      adminCache.set(remoteJid, { until: Date.now() + 60_000, ids: null });
+      adminCache.set(remoteJid, {
+        until: Date.now() + 60_000,
+        ids: null,
+        phones: new Map(),
+      });
       return null;
     }
 
     const ids = new Set<string>();
+    const phones = new Map<string, string>();
     for (const participant of readParticipants(await res.json())) {
+      const phone =
+        phoneDigits(participant.phoneNumber) ||
+        phoneDigits(participant.jid) ||
+        phoneDigits(participant.id);
+      if (phone) {
+        for (const key of [
+          participant.id,
+          participant.lid,
+          participant.phoneNumber,
+          participant.jid,
+        ]) {
+          if (typeof key === "string" && key.includes("@")) {
+            phones.set(canonicalJid(key), phone);
+          }
+        }
+      }
       const role = participant.admin;
       const isAdmin =
         role === "admin" || role === "superadmin" || role === true;
@@ -403,14 +434,36 @@ export async function fetchGroupAdminIds(
       addJid(ids, participant.jid);
     }
 
-    adminCache.set(remoteJid, { until: Date.now() + 10 * 60_000, ids });
+    adminCache.set(remoteJid, { until: Date.now() + 10 * 60_000, ids, phones });
     return ids;
   } catch {
-    adminCache.set(remoteJid, { until: Date.now() + 60_000, ids: null });
+    adminCache.set(remoteJid, {
+      until: Date.now() + 60_000,
+      ids: null,
+      phones: new Map(),
+    });
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function phoneForSender(
+  remoteJid: string,
+  candidates: Array<string | null | undefined>,
+): string | null {
+  for (const value of candidates) {
+    const direct = phoneDigits(value);
+    if (direct) return direct;
+  }
+  const phones = adminCache.get(remoteJid)?.phones;
+  if (!phones) return null;
+  for (const value of candidates) {
+    if (typeof value !== "string") continue;
+    const found = phones.get(canonicalJid(value));
+    if (found) return found;
+  }
+  return null;
 }
 
 export function senderIsGroupAdmin(
@@ -551,6 +604,35 @@ function revokeNamesAuthor(body: string, messageId: string): boolean {
   }
 }
 
+async function requestDeleteForEveryone(
+  input: { id: string; remoteJid: string },
+  participant: string,
+): Promise<string | null> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  const res = await fetch(
+    `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        id: input.id,
+        remoteJid: input.remoteJid,
+        fromMe: false,
+        participant,
+      }),
+    },
+  );
+  const text = await res.text();
+  if (!res.ok) return `Falha ao apagar mensagem: ${text.slice(0, 300)}`;
+  if (!revokeNamesAuthor(text, input.id)) {
+    return "A Evolution respondeu, mas o pedido não identificou o autor. Sem isso o WhatsApp não apaga para todos.";
+  }
+  return null;
+}
+
 export async function deleteMessageForEveryone(input: {
   id: string;
   remoteJid: string;
@@ -570,40 +652,39 @@ export async function deleteMessageForEveryone(input: {
     );
   }
 
-  const { baseUrl, apiKey, instance } = getConfig();
+  const attempts = 4;
+  const gapMs = 3000;
   let lastError = "Falha ao apagar a mensagem para todos.";
+  let accepted = false;
 
-  for (const participant of candidates) {
-    const res = await fetch(
-      `${baseUrl}/chat/deleteMessageForEveryone/${instance}`,
-      {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: apiKey,
-        },
-        body: JSON.stringify({
-          id: input.id,
-          remoteJid: input.remoteJid,
-          fromMe: false,
-          participant,
-        }),
-      },
-    );
-    const text = await res.text();
-    if (!res.ok) {
-      lastError = `Falha ao apagar mensagem: ${text.slice(0, 300)}`;
-      continue;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const ordered = [
+      ...candidates.slice(attempt % candidates.length),
+      ...candidates.slice(0, attempt % candidates.length),
+    ];
+    let attemptError: string | null = null;
+    for (const participant of ordered) {
+      try {
+        attemptError = await requestDeleteForEveryone(input, participant);
+      } catch (err) {
+        attemptError = err instanceof Error ? err.message : String(err);
+      }
+      if (!attemptError) break;
     }
-    if (!revokeNamesAuthor(text, input.id)) {
-      lastError =
-        "A Evolution respondeu, mas o pedido não identificou o autor. Sem isso o WhatsApp não apaga para todos.";
-      continue;
+    if (!attemptError) {
+      accepted = true;
+    } else {
+      lastError = attemptError;
+      console.error(
+        `[moderacao] apagar ${input.id} tentativa ${attempt + 1}/${attempts}: ${attemptError}`,
+      );
     }
-    return;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, gapMs));
+    }
   }
 
-  throw new Error(lastError);
+  if (!accepted) throw new Error(lastError);
 }
 
 export async function deleteOwnGroupMessage(input: {

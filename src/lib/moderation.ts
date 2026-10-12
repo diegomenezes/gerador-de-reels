@@ -4,6 +4,7 @@ import {
   fetchGroupAdminIds,
   fetchGroupMessages,
   findWebhook,
+  phoneForSender,
   senderIsGroupAdmin,
   sendTextMessage,
   setWebhook,
@@ -48,6 +49,34 @@ export function extractUrls(text: string): string[] {
   return urls;
 }
 
+const TRACKING_PARAMS = new Set([
+  "tracking_id",
+  "sid",
+  "position",
+  "type",
+  "be_origin",
+  "overlay_label",
+  "search_layout",
+  "polycard_client",
+  "matt_tool",
+  "matt_word",
+  "reco_id",
+  "c_id",
+  "c_uid",
+  "attributes",
+  "quantity",
+  "pdp_filters",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+  "fbclid",
+  "gclid",
+  "spm",
+  "scm",
+]);
+
 export function linkKey(raw: string): string | null {
   try {
     const url = new URL(raw);
@@ -57,7 +86,13 @@ export function linkKey(raw: string): string | null {
       return code ? `chat.whatsapp.com/${code}` : null;
     }
     const path = url.pathname.replace(/\/+$/, "");
-    return `${host}${path}${url.search}`;
+    const params = [...url.searchParams.entries()]
+      .filter(([name]) => !TRACKING_PARAMS.has(name.toLowerCase()))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const search = params.length
+      ? `?${params.map(([key, value]) => `${key}=${value}`).join("&")}`
+      : "";
+    return `${host}${path}${search}`;
   } catch {
     return null;
   }
@@ -154,6 +189,10 @@ export function parseEvolutionWebhook(body: unknown): IncomingMessage[] {
       participantAlt:
         (typeof key.participantAlt === "string" && key.participantAlt) ||
         (typeof key.participantPn === "string" && key.participantPn) ||
+        (typeof key.senderPn === "string" && key.senderPn) ||
+        (typeof raw.participantAlt === "string" && raw.participantAlt) ||
+        (typeof raw.participantPn === "string" && raw.participantPn) ||
+        (typeof raw.senderPn === "string" && raw.senderPn) ||
         null,
       pushName: typeof raw.pushName === "string" ? raw.pushName : null,
       text: text.trim(),
@@ -227,7 +266,8 @@ export async function processModerationMessage(message: IncomingMessage) {
     adminIds &&
     senderIsGroupAdmin(adminIds, [message.participant, message.participantAlt])
   ) {
-    return { ignored: true as const };
+    await rememberAdminLinks(urls);
+    return { ignored: true as const, adminLinks: urls.length };
   }
 
   const [settings, domains, whitelist, adminLinks] = await Promise.all([
@@ -258,10 +298,14 @@ export async function processModerationMessage(message: IncomingMessage) {
 
   if (matched.length === 0) return { ignored: true as const };
 
-  const author =
-    message.pushName && message.participant
-      ? `${message.pushName} (${message.participant})`
-      : message.pushName || message.participant || "desconhecido";
+  const phone = phoneForSender(message.remoteJid, [
+    message.participantAlt,
+    message.participant,
+  ]);
+  const name = message.pushName?.trim() || "";
+  const author = name && phone
+    ? `${name} (+${phone})`
+    : name || (phone ? `+${phone}` : "desconhecido");
 
   try {
     await prisma.moderationEvent.create({
