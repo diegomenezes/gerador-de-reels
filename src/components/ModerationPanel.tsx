@@ -5,6 +5,12 @@ import { useEffect, useState } from "react";
 
 type Domain = { id: string; domain: string };
 type Whitelist = { id: string; url: string };
+type SenderRank = {
+  name: string;
+  phone: string | null;
+  count: number;
+};
+
 type EventRow = {
   id: string;
   groupName: string;
@@ -40,6 +46,7 @@ type Props = {
   domains: Domain[];
   whitelist: Whitelist[];
   events: EventRow[];
+  offenders: SenderRank[];
   webhookMessage: string;
   webhookUrl: string;
   evolution: { ok: boolean; title: string; detail: string };
@@ -64,6 +71,7 @@ export function ModerationPanel({
   domains,
   whitelist,
   events,
+  offenders,
   webhookMessage,
   webhookUrl,
   evolution,
@@ -255,7 +263,8 @@ export function ModerationPanel({
           />
           <p className="text-sm text-[var(--ink-soft)]">
             Sai no grupo em que a mensagem foi apagada, só com esta opção ligada.
-            *assim* fica em negrito no WhatsApp.
+            *assim* fica em negrito no WhatsApp. No final, o bot marca o telefone
+            de quem enviou o link, para a pessoa receber o aviso.
           </p>
         </div>
         <div className="space-y-1">
@@ -491,6 +500,38 @@ export function ModerationPanel({
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="card space-y-3 p-5">
+        <h3 className="font-semibold">Quem mais mandou link bloqueado</h3>
+        <p className="text-sm text-[var(--ink-soft)]">
+          Uma vez pode ter sido sem querer. Quem chegou a três, vale tirar do grupo.
+        </p>
+        {offenders.length === 0 ? (
+          <p className="text-sm text-[var(--ink-soft)]">Ninguém ainda.</p>
+        ) : (
+          <div className="space-y-2 text-sm">
+            <div className="grid grid-cols-[1fr_auto_auto] gap-3 font-semibold text-[var(--ink-soft)]">
+              <span>Nome</span>
+              <span>Telefone</span>
+              <span className="text-right">Vezes</span>
+            </div>
+            {offenders.map((person) => (
+              <div
+                key={person.phone ?? person.name}
+                className="grid grid-cols-[1fr_auto_auto] items-center gap-3"
+              >
+                <span className="font-medium">{person.name}</span>
+                <span>{person.phone ? `+${person.phone}` : "sem telefone"}</span>
+                <span
+                  className={`justify-self-end ${person.count >= 3 ? "badge badge-warn" : "badge"}`}
+                >
+                  {person.count}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="space-y-3">

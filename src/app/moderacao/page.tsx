@@ -3,6 +3,7 @@ import { ModerationPanel } from "@/components/ModerationPanel";
 import { prisma } from "@/lib/db";
 import { checkEvolutionHealth } from "@/lib/evolution";
 import {
+  blockedSenderRanks,
   ensureModerationDefaults,
   registerModerationWebhook,
 } from "@/lib/moderation";
@@ -27,13 +28,18 @@ export default async function ModeracaoPage() {
   }
 
   const groups = await prisma.group.findMany({ orderBy: { name: "asc" } });
-  const [settings, domains, whitelist, events, evolution] = await Promise.all([
+  const [settings, domains, whitelist, events, rankedEvents, evolution] =
+    await Promise.all([
     prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
     prisma.blockedDomain.findMany({ orderBy: { domain: "asc" } }),
     prisma.whitelistLink.findMany({ orderBy: { createdAt: "desc" } }),
     prisma.moderationEvent.findMany({
       orderBy: { createdAt: "desc" },
       take: 50,
+    }),
+    prisma.moderationEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      select: { author: true, authorName: true, authorPhone: true },
     }),
     checkEvolutionHealth(groups.find((group) => group.active)?.remoteJid),
   ]);
@@ -55,6 +61,7 @@ export default async function ModeracaoPage() {
         announceText={settings.announceText}
         domains={domains}
         whitelist={whitelist}
+        offenders={blockedSenderRanks(rankedEvents)}
         events={events.map((event) => ({
           id: event.id,
           groupName: event.groupName,

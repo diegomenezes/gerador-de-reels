@@ -215,6 +215,48 @@ async function rememberAdminLinks(urls: string[]) {
   }
 }
 
+const PHONE_IN_AUTHOR = /\(\+(\d{10,15})\)\s*$/;
+
+export type BlockedSenderRank = {
+  name: string;
+  phone: string | null;
+  count: number;
+};
+
+export function blockedSenderRanks(
+  events: Array<{
+    author: string;
+    authorName?: string | null;
+    authorPhone?: string | null;
+  }>,
+): BlockedSenderRank[] {
+  const grouped = new Map<string, BlockedSenderRank>();
+  for (const event of events) {
+    const parsedPhone = event.author.match(PHONE_IN_AUTHOR)?.[1] ?? null;
+    const phone = event.authorPhone?.trim() || parsedPhone;
+    const name =
+      event.authorName?.trim() ||
+      event.author.replace(/\s*\([^)]*\)\s*$/, "").trim() ||
+      "Sem nome";
+    const key = phone || `nome:${name.toLowerCase()}`;
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, { name, phone: phone || null, count: 1 });
+      continue;
+    }
+    current.count += 1;
+    if (
+      (current.name === "Sem nome" || current.name === "desconhecido") &&
+      name !== "desconhecido"
+    ) {
+      current.name = name;
+    }
+  }
+  return [...grouped.values()].sort(
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR"),
+  );
+}
+
 export async function rememberGroupMessage(message: IncomingMessage) {
   const group = await prisma.group.findUnique({
     where: { remoteJid: message.remoteJid },
@@ -314,6 +356,8 @@ export async function processModerationMessage(message: IncomingMessage) {
         waMessageId: message.waMessageId,
         groupName: group.name,
         author,
+        authorName: name,
+        authorPhone: phone ?? "",
         text: message.text,
         matchedUrl: matched.join("\n"),
         action: "pending",
@@ -349,7 +393,15 @@ export async function processModerationMessage(message: IncomingMessage) {
       detail = "Mensagem de moderação vazia.";
     } else {
       try {
-        await sendTextMessage(group.remoteJid, announcement, { delay: 1500 });
+        const mention = phone ? `@${phone}` : "";
+        await sendTextMessage(
+          group.remoteJid,
+          mention ? `${announcement}\n\n${mention}` : announcement,
+          {
+            delay: 1500,
+            mentioned: phone ? [phone] : undefined,
+          },
+        );
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         detail = `Não consegui avisar no grupo: ${reason}`;

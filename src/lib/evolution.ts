@@ -484,7 +484,7 @@ export type SentMessage = {
 export async function sendTextMessage(
   number: string,
   text: string,
-  options?: { delay?: number },
+  options?: { delay?: number; mentioned?: string[] },
 ): Promise<SentMessage> {
   const { baseUrl, apiKey, instance } = getConfig();
   const destination = number.trim();
@@ -502,6 +502,7 @@ export async function sendTextMessage(
       text,
       linkPreview: false,
       ...(options?.delay ? { delay: options.delay } : {}),
+      ...(options?.mentioned?.length ? { mentioned: options.mentioned } : {}),
     }),
   });
   const body = await res.text();

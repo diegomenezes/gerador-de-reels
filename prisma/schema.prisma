@@ -123,6 +123,8 @@ model ModerationEvent {
   waMessageId String
   groupName   String
   author      String
+  authorName  String   @default("")
+  authorPhone String   @default("")
   text        String
   matchedUrl  String
   action      String
