@@ -9,6 +9,7 @@ import {
   sendTextMessage,
   setWebhook,
   type EvolutionMessage,
+  type GroupLatestMessage,
 } from "./evolution";
 
 const DEFAULT_DOMAINS = [
@@ -284,6 +285,33 @@ export async function rememberGroupMessage(message: IncomingMessage) {
       timestamp: message.timestamp,
     },
   });
+}
+
+export async function latestStoredGroupMessage(input: {
+  name: string;
+  remoteJid: string;
+  active: boolean;
+  groupId: string;
+}): Promise<GroupLatestMessage> {
+  const latest = await prisma.message.findFirst({
+    where: { groupId: input.groupId },
+    orderBy: { timestamp: "desc" },
+  });
+  const text = latest?.text.replace(/\s+/g, " ").trim() ?? "";
+  return {
+    name: input.name,
+    remoteJid: input.remoteJid,
+    active: input.active,
+    at: latest
+      ? latest.timestamp.toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        })
+      : null,
+    preview: text ? text.slice(0, 160) : "Nenhuma mensagem encontrada.",
+    fromMe: false,
+    author: latest?.author ?? null,
+    error: null,
+  };
 }
 
 export async function processModerationMessage(message: IncomingMessage) {

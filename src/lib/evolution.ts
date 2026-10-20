@@ -189,28 +189,6 @@ async function postFindMessages(
   }
 }
 
-const MESSAGE_KIND: Record<string, string> = {
-  imageMessage: "Imagem",
-  videoMessage: "Vídeo",
-  audioMessage: "Áudio",
-  stickerMessage: "Figurinha",
-  reactionMessage: "Reação",
-  albumMessage: "Álbum",
-  documentMessage: "Documento",
-  protocolMessage: "Mensagem apagada",
-  secretEncryptedMessage: "Mensagem criptografada",
-};
-
-function messagePreview(raw: Record<string, unknown>): string {
-  const text = extractText(raw)?.replace(/\s+/g, " ").trim();
-  if (text) return text.slice(0, 160);
-  const message = (raw.message ?? {}) as Record<string, unknown>;
-  const kind = Object.keys(message).find(
-    (key) => key !== "messageContextInfo" && key !== "senderKeyDistributionMessage",
-  );
-  return (kind && MESSAGE_KIND[kind]) || "Mensagem sem texto";
-}
-
 export type GroupLatestMessage = {
   name: string;
   remoteJid: string;
@@ -221,76 +199,6 @@ export type GroupLatestMessage = {
   author: string | null;
   error: string | null;
 };
-
-export async function fetchLatestGroupMessage(
-  input: {
-    name: string;
-    remoteJid: string;
-    active: boolean;
-  },
-  timeoutMs = 50000,
-): Promise<GroupLatestMessage> {
-  const base = {
-    name: input.name,
-    remoteJid: input.remoteJid,
-    active: input.active,
-    at: null,
-    preview: "",
-    fromMe: false,
-    author: null,
-    error: null as string | null,
-  };
-
-  try {
-    const { baseUrl, apiKey, instance } = getConfig();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(`${baseUrl}/chat/findMessages/${instance}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: apiKey,
-        },
-        body: JSON.stringify({
-          where: { key: { remoteJid: input.remoteJid } },
-          page: 1,
-          offset: 1,
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        return { ...base, error: "A Evolution não devolveu as mensagens." };
-      }
-      const rows = unwrapList(await res.json());
-      const raw = rows[0];
-      if (!raw) {
-        return { ...base, preview: "Nenhuma mensagem encontrada." };
-      }
-      const when = toDate(raw.messageTimestamp);
-      const key = (raw.key ?? {}) as Record<string, unknown>;
-      return {
-        ...base,
-        at: when
-          ? when.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
-          : null,
-        preview: messagePreview(raw),
-        fromMe: key.fromMe === true,
-        author: typeof raw.pushName === "string" ? raw.pushName : null,
-      };
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (err) {
-    const aborted = err instanceof Error && err.name === "AbortError";
-    return {
-      ...base,
-      error: aborted
-        ? "A Evolution demorou demais para responder."
-        : "Não consegui ler a última mensagem.",
-    };
-  }
-}
 
 export async function fetchGroupMessages({
   remoteJid,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { fetchLatestGroupMessage } from "@/lib/evolution";
+import { latestStoredGroupMessage } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +15,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Grupo não cadastrado." }, { status: 404 });
   }
 
-  const latest = await fetchLatestGroupMessage(
-    {
-      name: group.name,
-      remoteJid: group.remoteJid,
-      active: group.active,
-    },
-    50000,
-  );
+  const latest = await latestStoredGroupMessage({
+    name: group.name,
+    remoteJid: group.remoteJid,
+    active: group.active,
+    groupId: group.id,
+  });
   return NextResponse.json({ latest });
 }
