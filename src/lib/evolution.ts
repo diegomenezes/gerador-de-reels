@@ -542,6 +542,52 @@ async function requestDeleteForEveryone(
   return null;
 }
 
+const RESTART_COOLDOWN_MS = 5 * 60_000;
+let lastRestartAt = 0;
+
+async function connectionState(): Promise<string | null> {
+  const { baseUrl, apiKey, instance } = getConfig();
+  try {
+    const res = await fetchEvolution(
+      `${baseUrl}/instance/connectionState/${instance}`,
+      apiKey,
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { instance?: { state?: string } };
+    return json.instance?.state ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// A Evolution às vezes diz que a sessão está aberta, mas o socket do WhatsApp
+// caiu ("Connection Closed"). Reiniciar a instância reconecta sem pedir QR.
+async function restartAfterConnectionClosed(): Promise<boolean> {
+  if (Date.now() - lastRestartAt < RESTART_COOLDOWN_MS) return false;
+  lastRestartAt = Date.now();
+  const { baseUrl, apiKey, instance } = getConfig();
+  try {
+    const res = await fetch(`${baseUrl}/instance/restart/${instance}`, {
+      method: "POST",
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      console.error(`[moderacao] reiniciar Evolution: ${(await res.text()).slice(0, 300)}`);
+      return false;
+    }
+  } catch (err) {
+    console.error("[moderacao] reiniciar Evolution:", err);
+    return false;
+  }
+  console.log("[moderacao] conexão do WhatsApp caiu, reiniciei a instância.");
+  for (let wait = 0; wait < 10; wait += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    if ((await connectionState()) === "open") return true;
+  }
+  return false;
+}
+
 export async function deleteMessageForEveryone(input: {
   id: string;
   remoteJid: string;
@@ -590,6 +636,26 @@ export async function deleteMessageForEveryone(input: {
     }
     if (attempt < attempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, gapMs));
+    }
+  }
+
+  if (!accepted && /connection closed/i.test(lastError)) {
+    if (await restartAfterConnectionClosed()) {
+      // o socket acabou de voltar e às vezes ainda recusa o primeiro pedido
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      for (const participant of candidates) {
+        let attemptError: string | null;
+        try {
+          attemptError = await requestDeleteForEveryone(input, participant);
+        } catch (err) {
+          attemptError = err instanceof Error ? err.message : String(err);
+        }
+        if (!attemptError) {
+          accepted = true;
+          break;
+        }
+        lastError = attemptError;
+      }
     }
   }
 

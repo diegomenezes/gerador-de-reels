@@ -28,10 +28,20 @@ export default async function ModeracaoPage() {
   }
 
   const groups = await prisma.group.findMany({ orderBy: { name: "asc" } });
-  const [settings, domains, whitelist, events, rankedEvents, evolution] =
-    await Promise.all([
+  const [
+    settings,
+    domains,
+    allowedDomains,
+    unknownLinks,
+    whitelist,
+    events,
+    rankedEvents,
+    evolution,
+  ] = await Promise.all([
     prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
     prisma.blockedDomain.findMany({ orderBy: { domain: "asc" } }),
+    prisma.allowedDomain.findMany({ orderBy: { domain: "asc" } }),
+    prisma.unknownLink.findMany({ orderBy: { lastSeenAt: "desc" }, take: 100 }),
     prisma.whitelistLink.findMany({ orderBy: { createdAt: "desc" } }),
     prisma.moderationEvent.findMany({
       orderBy: { createdAt: "desc" },
@@ -50,7 +60,8 @@ export default async function ModeracaoPage() {
         <p className="mt-2 max-w-xl text-[var(--ink-soft)]">
           Links de loja e convite nos grupos cadastrados. O aviso sai na hora
           em que a mensagem chega. Links que você mesmo enviou ficam liberados
-          por 72 horas.
+          por 72 horas. Link de domínio que não está em nenhuma lista só gera
+          aviso no grupo de aviso, sem apagar.
         </p>
       </section>
       <ModerationPanel
@@ -60,6 +71,17 @@ export default async function ModeracaoPage() {
         announceDelete={settings.announceDelete}
         announceText={settings.announceText}
         domains={domains}
+        allowedDomains={allowedDomains}
+        unknownLinks={unknownLinks.map((link) => ({
+          id: link.id,
+          domain: link.domain,
+          sample: link.sample,
+          groupName: link.groupName,
+          author: link.author,
+          text: link.text,
+          count: link.count,
+          lastSeenAt: link.lastSeenAt.toISOString(),
+        }))}
         whitelist={whitelist}
         offenders={blockedSenderRanks(rankedEvents)}
         events={events.map((event) => ({

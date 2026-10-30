@@ -101,6 +101,27 @@ model BlockedDomain {
   createdAt DateTime @default(now())
 }
 
+model AllowedDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model UnknownLink {
+  id            String   @id @default(cuid())
+  domain        String   @unique
+  sample        String
+  groupName     String
+  author        String
+  text          String
+  count         Int      @default(1)
+  lastMessageId String
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  @@index([lastSeenAt])
+}
+
 model WhitelistLink {
   id        String   @id @default(cuid())
   url       String   @unique
@@ -118,22 +139,27 @@ model AdminLink {
 }
 
 model ModerationEvent {
-  id          String   @id @default(cuid())
-  groupJid    String
-  waMessageId String
-  groupName   String
-  author      String
-  authorName  String   @default("")
-  authorPhone String   @default("")
-  text        String
-  matchedUrl  String
-  action      String
-  detail      String?
-  messageAt   DateTime
-  createdAt   DateTime @default(now())
+  id             String    @id @default(cuid())
+  groupJid       String
+  waMessageId    String
+  groupName      String
+  author         String
+  authorName     String    @default("")
+  authorPhone    String    @default("")
+  text           String
+  matchedUrl     String
+  action         String
+  detail         String?
+  participant    String    @default("")
+  participantAlt String    @default("")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime?
+  messageAt      DateTime
+  createdAt      DateTime  @default(now())
 
   @@unique([groupJid, waMessageId])
   @@index([createdAt])
+  @@index([action, nextAttemptAt])
 }
 
 model JobRun {

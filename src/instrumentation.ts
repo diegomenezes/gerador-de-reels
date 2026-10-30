@@ -12,10 +12,14 @@ export async function register() {
     );
   }
 
+  const { registerModerationWebhook, startModerationWorker } = await import(
+    "./lib/moderation"
+  );
+  startModerationWorker();
+
   const base = process.env.APP_PUBLIC_URL?.replace(/\/$/, "");
   if (!base) return;
 
-  const { registerModerationWebhook } = await import("./lib/moderation");
   try {
     const result = await registerModerationWebhook(
       `${base}/api/moderation/webhook`,

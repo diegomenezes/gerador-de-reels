@@ -119,6 +119,39 @@ export function hostMatchesDomain(hostname: string, domain: string): boolean {
   return host === blocked || host.endsWith(`.${blocked}`);
 }
 
+const TWO_PART_SUFFIXES = new Set([
+  "com.br",
+  "net.br",
+  "org.br",
+  "gov.br",
+  "edu.br",
+  "art.br",
+  "blog.br",
+  "app.br",
+  "com.ar",
+  "com.mx",
+  "com.au",
+  "co.uk",
+  "co.jp",
+]);
+
+// pt.aliexpress.com -> aliexpress.com, loja.exemplo.com.br -> exemplo.com.br
+export function baseDomain(hostname: string): string {
+  const host = hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  if (/^\d+(\.\d+){3}$/.test(host)) return host;
+  const parts = host.split(".");
+  const lastTwo = parts.slice(-2).join(".");
+  return parts.slice(TWO_PART_SUFFIXES.has(lastTwo) ? -3 : -2).join(".");
+}
+
+function hostnameOf(raw: string): string | null {
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+}
+
 export async function ensureModerationDefaults() {
   await prisma.moderationSettings.upsert({
     where: { id: "default" },
@@ -133,6 +166,27 @@ export async function ensureModerationDefaults() {
       update: {},
     });
   }
+}
+
+const WRAPPERS = [
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+  "documentWithCaptionMessage",
+];
+
+// Grupo com mensagens temporárias manda o texto dentro de ephemeralMessage.message.
+function unwrapMessage(value: unknown): Record<string, unknown> {
+  let message = (value ?? {}) as Record<string, unknown>;
+  for (let depth = 0; depth < 3; depth += 1) {
+    const wrapper = WRAPPERS.find(
+      (name) => (message[name] as { message?: unknown } | undefined)?.message,
+    );
+    if (!wrapper) break;
+    message = (message[wrapper] as { message: Record<string, unknown> }).message;
+  }
+  return message;
 }
 
 export function parseEvolutionWebhook(body: unknown): IncomingMessage[] {
@@ -162,7 +216,7 @@ export function parseEvolutionWebhook(body: unknown): IncomingMessage[] {
     const remoteJid = typeof key.remoteJid === "string" ? key.remoteJid : null;
     if (!waMessageId || !remoteJid || !remoteJid.endsWith("@g.us")) continue;
 
-    const message = (raw.message ?? {}) as Record<string, unknown>;
+    const message = unwrapMessage(raw.message);
     const text =
       (typeof message.conversation === "string" && message.conversation) ||
       (typeof (message.extendedTextMessage as { text?: string } | undefined)?.text ===
@@ -174,6 +228,9 @@ export function parseEvolutionWebhook(body: unknown): IncomingMessage[] {
       (typeof (message.videoMessage as { caption?: string } | undefined)?.caption ===
         "string" &&
         (message.videoMessage as { caption: string }).caption) ||
+      (typeof (message.documentMessage as { caption?: string } | undefined)?.caption ===
+        "string" &&
+        (message.documentMessage as { caption: string }).caption) ||
       "";
     if (!text.trim()) continue;
 
@@ -314,6 +371,107 @@ export async function latestStoredGroupMessage(input: {
   };
 }
 
+const RETRY_DELAYS_MIN = [1, 2, 5, 10, 30, 60, 120, 240];
+const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const STUCK_PENDING_MS = 3 * 60 * 1000;
+
+function nextAttemptAfter(attempts: number): Date | null {
+  const minutes = RETRY_DELAYS_MIN[attempts - 1];
+  return minutes ? new Date(Date.now() + minutes * 60_000) : null;
+}
+
+function formatWhen(date: Date): string {
+  return date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
+async function notifyAlertGroup(
+  notifyNumber: string,
+  lines: string[],
+): Promise<string | null> {
+  const notifyGroup = toGroupJid(notifyNumber);
+  if (!notifyGroup) {
+    return notifyGroup === ""
+      ? "Grupo de aviso não configurado"
+      : "ID do grupo de aviso inválido";
+  }
+  try {
+    await sendTextMessage(notifyGroup, lines.join("\n"));
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function announceDeletion(
+  announceText: string,
+  groupJid: string,
+  phone: string | null,
+): Promise<string | null> {
+  const announcement = announceText.trim();
+  if (!announcement) return "Mensagem de moderação vazia.";
+  try {
+    const mention = phone ? `@${phone}` : "";
+    await sendTextMessage(
+      groupJid,
+      mention ? `${announcement}\n\n${mention}` : announcement,
+      {
+        delay: 1500,
+        mentioned: phone ? [phone] : undefined,
+      },
+    );
+    return null;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return `Não consegui avisar no grupo: ${reason}`;
+  }
+}
+
+// Guarda o domínio estranho no painel. Devolve só os links de domínios que
+// ainda não estavam na lista, para o grupo de aviso receber um alerta por domínio.
+async function recordUnknownLinks(
+  urls: string[],
+  context: { groupName: string; author: string; message: IncomingMessage },
+): Promise<string[]> {
+  const byDomain = new Map<string, string>();
+  for (const sample of urls) {
+    const hostname = hostnameOf(sample);
+    if (!hostname) continue;
+    const domain = baseDomain(hostname);
+    if (!byDomain.has(domain)) byDomain.set(domain, sample);
+  }
+
+  const fresh: string[] = [];
+  for (const [domain, sample] of byDomain) {
+    const details = {
+      sample,
+      groupName: context.groupName,
+      author: context.author,
+      text: context.message.text,
+      lastMessageId: context.message.waMessageId,
+      lastSeenAt: context.message.timestamp,
+    };
+    const existing = await prisma.unknownLink.findUnique({ where: { domain } });
+    if (existing) {
+      if (existing.lastMessageId !== context.message.waMessageId) {
+        await prisma.unknownLink.update({
+          where: { domain },
+          data: { ...details, count: { increment: 1 } },
+        });
+      }
+      continue;
+    }
+    try {
+      await prisma.unknownLink.create({
+        data: { domain, ...details, firstSeenAt: context.message.timestamp },
+      });
+      fresh.push(sample);
+    } catch {
+      // outra mensagem criou o mesmo domínio ao mesmo tempo
+    }
+  }
+  return fresh;
+}
+
 export async function processModerationMessage(message: IncomingMessage) {
   await ensureModerationDefaults();
   await prisma.adminLink.deleteMany({ where: { expiresAt: { lt: new Date() } } });
@@ -340,12 +498,14 @@ export async function processModerationMessage(message: IncomingMessage) {
     return { ignored: true as const, adminLinks: urls.length };
   }
 
-  const [settings, domains, whitelist, adminLinks] = await Promise.all([
-    prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
-    prisma.blockedDomain.findMany(),
-    prisma.whitelistLink.findMany(),
-    prisma.adminLink.findMany({ where: { expiresAt: { gt: new Date() } } }),
-  ]);
+  const [settings, domains, allowedDomains, whitelist, adminLinks] =
+    await Promise.all([
+      prisma.moderationSettings.findUniqueOrThrow({ where: { id: "default" } }),
+      prisma.blockedDomain.findMany(),
+      prisma.allowedDomain.findMany(),
+      prisma.whitelistLink.findMany(),
+      prisma.adminLink.findMany({ where: { expiresAt: { gt: new Date() } } }),
+    ]);
 
   if (!settings.enabled) return { ignored: true as const };
 
@@ -354,19 +514,25 @@ export async function processModerationMessage(message: IncomingMessage) {
     ...whitelist.map((link) => linkKey(link.url)).filter((key): key is string => !!key),
   ]);
 
-  const matched = urls.filter((sample) => {
+  const matched: string[] = [];
+  const unknown: string[] = [];
+  for (const sample of urls) {
     const key = linkKey(sample);
-    if (key && allowed.has(key)) return false;
-    let hostname = "";
-    try {
-      hostname = new URL(sample).hostname;
-    } catch {
-      return false;
+    if (key && allowed.has(key)) continue;
+    const hostname = hostnameOf(sample);
+    if (!hostname) continue;
+    if (domains.some((domain) => hostMatchesDomain(hostname, domain.domain))) {
+      matched.push(sample);
+    } else if (
+      !allowedDomains.some((domain) => hostMatchesDomain(hostname, domain.domain))
+    ) {
+      unknown.push(sample);
     }
-    return domains.some((domain) => hostMatchesDomain(hostname, domain.domain));
-  });
+  }
 
-  if (matched.length === 0) return { ignored: true as const };
+  if (matched.length === 0 && unknown.length === 0) {
+    return { ignored: true as const };
+  }
 
   const phone = phoneForSender(message.remoteJid, [
     message.participantAlt,
@@ -377,6 +543,28 @@ export async function processModerationMessage(message: IncomingMessage) {
     ? `${name} (+${phone})`
     : name || (phone ? `+${phone}` : "desconhecido");
 
+  const freshUnknown = unknown.length
+    ? await recordUnknownLinks(unknown, { groupName: group.name, author, message })
+    : [];
+
+  if (matched.length === 0) {
+    if (freshUnknown.length === 0) {
+      return { ignored: false as const, action: "unknown_seen" };
+    }
+    const failure = await notifyAlertGroup(settings.notifyNumber, [
+      `Link não identificado em ${group.name}`,
+      `Quem: ${author}`,
+      `Quando: ${formatWhen(message.timestamp)}`,
+      `Link: ${freshUnknown.join(", ")}`,
+      "",
+      message.text,
+      "",
+      "Nada foi apagado. Libere ou bloqueie o domínio no painel de Moderação.",
+    ]);
+    if (failure) console.error(`[moderacao] aviso de link estranho: ${failure}`);
+    return { ignored: false as const, action: "unknown" };
+  }
+
   try {
     await prisma.moderationEvent.create({
       data: {
@@ -386,6 +574,8 @@ export async function processModerationMessage(message: IncomingMessage) {
         author,
         authorName: name,
         authorPhone: phone ?? "",
+        participant: message.participant ?? "",
+        participantAlt: message.participantAlt ?? "",
         text: message.text,
         matchedUrl: matched.join("\n"),
         action: "pending",
@@ -399,8 +589,11 @@ export async function processModerationMessage(message: IncomingMessage) {
   let action = "notified";
   let detail: string | null = null;
   let deletedForEveryone = false;
+  let attempts = 0;
+  let nextAttemptAt: Date | null = null;
 
   if (settings.deleteMode) {
+    attempts = 1;
     try {
       await deleteMessageForEveryone({
         id: message.waMessageId,
@@ -412,72 +605,36 @@ export async function processModerationMessage(message: IncomingMessage) {
     } catch (err) {
       detail = err instanceof Error ? err.message : String(err);
       action = "delete_failed";
+      nextAttemptAt = nextAttemptAfter(attempts);
     }
   }
 
   if (deletedForEveryone && settings.announceDelete) {
-    const announcement = settings.announceText.trim();
-    if (!announcement) {
-      detail = "Mensagem de moderação vazia.";
-    } else {
-      try {
-        const mention = phone ? `@${phone}` : "";
-        await sendTextMessage(
-          group.remoteJid,
-          mention ? `${announcement}\n\n${mention}` : announcement,
-          {
-            delay: 1500,
-            mentioned: phone ? [phone] : undefined,
-          },
-        );
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        detail = `Não consegui avisar no grupo: ${reason}`;
-      }
-    }
+    detail = await announceDeletion(settings.announceText, group.remoteJid, phone);
   }
 
   const outcome = !settings.deleteMode
     ? "A mensagem não foi apagada. O modo apagar está desligado."
     : deletedForEveryone
       ? "A mensagem foi apagada para todos no grupo."
-      : `A mensagem não foi apagada para todos. ${detail}`;
+      : `A mensagem não foi apagada para todos. ${detail} Vou tentar de novo sozinho nas próximas horas e aviso aqui.`;
 
-  const notifyGroup = toGroupJid(settings.notifyNumber);
-  if (notifyGroup) {
-    const when = message.timestamp.toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo",
-    });
-    try {
-      await sendTextMessage(
-        notifyGroup,
-        [
-          `Link bloqueado em ${group.name}`,
-          `Quem: ${author}`,
-          `Quando: ${when}`,
-          `Link: ${matched.join(", ")}`,
-          "",
-          message.text,
-          "",
-          outcome,
-        ].join("\n"),
-      );
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      detail = detail ? `${detail} | ${reason}` : reason;
-      action = deletedForEveryone
-        ? "deleted_notify_failed"
-        : action === "delete_failed"
-          ? "delete_failed"
-          : "notify_failed";
+  const notifyFailure = await notifyAlertGroup(settings.notifyNumber, [
+    `Link bloqueado em ${group.name}`,
+    `Quem: ${author}`,
+    `Quando: ${formatWhen(message.timestamp)}`,
+    `Link: ${matched.join(", ")}`,
+    ...(unknown.length ? [`Link não identificado: ${unknown.join(", ")}`] : []),
+    "",
+    message.text,
+    "",
+    outcome,
+  ]);
+  if (notifyFailure) {
+    detail = detail ? `${detail} | ${notifyFailure}` : notifyFailure;
+    if (action !== "delete_failed") {
+      action = deletedForEveryone ? "deleted_notify_failed" : "notify_failed";
     }
-  } else {
-    const reason =
-      notifyGroup === ""
-        ? "Grupo de aviso não configurado"
-        : "ID do grupo de aviso inválido";
-    detail = detail ? `${detail} | ${reason}` : reason;
-    action = deletedForEveryone ? "deleted_notify_failed" : "notify_failed";
   }
 
   await prisma.moderationEvent.update({
@@ -487,10 +644,132 @@ export async function processModerationMessage(message: IncomingMessage) {
         waMessageId: message.waMessageId,
       },
     },
-    data: { action, detail },
+    data: { action, detail, attempts, nextAttemptAt },
   });
 
   return { ignored: false as const, action };
+}
+
+type StoredEvent = Awaited<ReturnType<typeof prisma.moderationEvent.findFirstOrThrow>>;
+type StoredSettings = Awaited<
+  ReturnType<typeof prisma.moderationSettings.findUniqueOrThrow>
+>;
+
+async function retryDelete(event: StoredEvent, settings: StoredSettings) {
+  const attempts = event.attempts + 1;
+  const where = { id: event.id };
+  const lines = [
+    `Quem: ${event.author}`,
+    `Quando: ${formatWhen(event.messageAt)}`,
+    `Link: ${event.matchedUrl.split("\n").join(", ")}`,
+  ];
+
+  try {
+    await deleteMessageForEveryone({
+      id: event.waMessageId,
+      remoteJid: event.groupJid,
+      participants: [event.participant, event.participantAlt],
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const next = nextAttemptAfter(attempts);
+    const givingUp =
+      !next || next.getTime() - event.messageAt.getTime() > RETRY_WINDOW_MS;
+    await prisma.moderationEvent.update({
+      where,
+      data: {
+        action: "delete_failed",
+        attempts,
+        nextAttemptAt: givingUp ? null : next,
+        detail: givingUp
+          ? `Desisti depois de ${attempts} tentativas. ${reason}`
+          : `Tentativa ${attempts} falhou. ${reason}`,
+      },
+    });
+    if (givingUp) {
+      const failure = await notifyAlertGroup(settings.notifyNumber, [
+        `APAGUE À MÃO: link bloqueado em ${event.groupName}`,
+        ...lines,
+        "",
+        event.text,
+        "",
+        `Tentei apagar ${attempts} vezes e não consegui. ${reason}`,
+      ]);
+      if (failure) console.error(`[moderacao] aviso de desistência: ${failure}`);
+    }
+    return;
+  }
+
+  let detail = `Apagada na tentativa ${attempts}.`;
+  if (settings.announceDelete) {
+    const failure = await announceDeletion(
+      settings.announceText,
+      event.groupJid,
+      event.authorPhone || null,
+    );
+    if (failure) detail = `${detail} ${failure}`;
+  }
+  await prisma.moderationEvent.update({
+    where,
+    data: { action: "deleted", attempts, nextAttemptAt: null, detail },
+  });
+  const failure = await notifyAlertGroup(settings.notifyNumber, [
+    `Link apagado depois em ${event.groupName}`,
+    ...lines,
+    "",
+    `Apaguei na tentativa ${attempts}.`,
+  ]);
+  if (failure) console.error(`[moderacao] aviso de exclusão atrasada: ${failure}`);
+}
+
+// Tenta de novo o que falhou e retoma o que ficou em "Processando" porque o
+// processo caiu no meio. Depois de 24 horas desiste e pede para apagar à mão.
+export async function retryFailedDeletes() {
+  const settings = await prisma.moderationSettings.findUnique({
+    where: { id: "default" },
+  });
+  if (!settings?.enabled || !settings.deleteMode) return { retried: 0 };
+
+  const now = Date.now();
+  const events = await prisma.moderationEvent.findMany({
+    where: {
+      messageAt: { gt: new Date(now - RETRY_WINDOW_MS) },
+      OR: [
+        { action: "delete_failed", nextAttemptAt: { lte: new Date(now) } },
+        { action: "pending", createdAt: { lt: new Date(now - STUCK_PENDING_MS) } },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    take: 10,
+  });
+
+  for (const event of events) {
+    try {
+      await retryDelete(event, settings);
+    } catch (err) {
+      console.error(`[moderacao] nova tentativa ${event.id}:`, err);
+    }
+  }
+  return { retried: events.length };
+}
+
+export function startModerationWorker() {
+  const holder = globalThis as {
+    __moderationWorker?: ReturnType<typeof setInterval>;
+  };
+  if (holder.__moderationWorker) return;
+  let running = false;
+  holder.__moderationWorker = setInterval(async () => {
+    if (running) return;
+    running = true;
+    try {
+      await retryFailedDeletes();
+    } catch (err) {
+      console.error("[moderacao] fila de exclusão:", err);
+    } finally {
+      running = false;
+    }
+  }, 60_000);
 }
 
 export async function scanRecentMessages(minutes = 30) {

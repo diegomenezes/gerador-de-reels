@@ -5,6 +5,16 @@ import { useEffect, useState } from "react";
 
 type Domain = { id: string; domain: string };
 type Whitelist = { id: string; url: string };
+type UnknownLink = {
+  id: string;
+  domain: string;
+  sample: string;
+  groupName: string;
+  author: string;
+  text: string;
+  count: number;
+  lastSeenAt: string;
+};
 type SenderRank = {
   name: string;
   phone: string | null;
@@ -44,6 +54,8 @@ type Props = {
   deleteMode: boolean;
   notifyNumber: string;
   domains: Domain[];
+  allowedDomains: Domain[];
+  unknownLinks: UnknownLink[];
   whitelist: Whitelist[];
   events: EventRow[];
   offenders: SenderRank[];
@@ -58,7 +70,7 @@ type Props = {
 const ACTION_LABEL: Record<string, string> = {
   notified: "Avisado",
   deleted: "Apagado",
-  delete_failed: "Aviso ok, apagar falhou",
+  delete_failed: "Apagar falhou",
   notify_failed: "Falha no aviso",
   deleted_notify_failed: "Apagado, aviso falhou",
   pending: "Processando",
@@ -69,6 +81,8 @@ export function ModerationPanel({
   deleteMode,
   notifyNumber,
   domains,
+  allowedDomains,
+  unknownLinks,
   whitelist,
   events,
   offenders,
@@ -89,6 +103,7 @@ export function ModerationPanel({
   const [willAnnounce, setWillAnnounce] = useState(announceDelete);
   const [announcement, setAnnouncement] = useState(announceText);
   const [domain, setDomain] = useState("");
+  const [allowedDomain, setAllowedDomain] = useState("");
   const [invite, setInvite] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -392,6 +407,157 @@ export function ModerationPanel({
         >
           {loading === "scan" ? "Testando..." : "Testar mensagens dos últimos 30 min"}
         </button>
+      </section>
+
+      <section className="card space-y-3 p-5">
+        <h3 className="font-semibold">Links não identificados</h3>
+        <p className="text-sm text-[var(--ink-soft)]">
+          Domínios que não estão nos bloqueados nem nos liberados. A mensagem
+          fica no grupo e só o grupo de aviso recebe um alerta, uma vez por
+          domínio. Decida aqui para não aparecer de novo.
+        </p>
+        {unknownLinks.length === 0 ? (
+          <p className="text-sm text-[var(--ink-soft)]">Nenhum link estranho.</p>
+        ) : (
+          <ul className="space-y-3">
+            {unknownLinks.map((link) => (
+              <li
+                key={link.id}
+                className="space-y-2 rounded-xl border border-[var(--line)] p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">
+                    {link.domain}{" "}
+                    <span className="badge">
+                      {link.count} {link.count === 1 ? "vez" : "vezes"}
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-secondary text-sm"
+                      disabled={!!loading}
+                      onClick={() =>
+                        run(`unknown-allow-${link.id}`, async () => {
+                          const res = await fetch(
+                            `/api/moderation/unknown/${link.id}`,
+                            {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ decision: "allow" }),
+                            },
+                          );
+                          const data = await res.json().catch(() => ({}));
+                          if (!res.ok) throw new Error(data.error || "Falha ao liberar");
+                          setInfo(`${link.domain} liberado.`);
+                        })
+                      }
+                    >
+                      {loading === `unknown-allow-${link.id}`
+                        ? "Liberando..."
+                        : "Adicionar à whitelist"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger text-sm"
+                      disabled={!!loading}
+                      onClick={() =>
+                        run(`unknown-block-${link.id}`, async () => {
+                          const res = await fetch(
+                            `/api/moderation/unknown/${link.id}`,
+                            {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ decision: "block" }),
+                            },
+                          );
+                          const data = await res.json().catch(() => ({}));
+                          if (!res.ok) throw new Error(data.error || "Falha ao bloquear");
+                          setInfo(`${link.domain} bloqueado.`);
+                        })
+                      }
+                    >
+                      {loading === `unknown-block-${link.id}`
+                        ? "Bloqueando..."
+                        : "Bloquear"}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[var(--ink-soft)]">
+                  {link.groupName} · {link.author} ·{" "}
+                  {new Date(link.lastSeenAt).toLocaleString("pt-BR")}
+                </p>
+                <p className="break-all">{link.sample}</p>
+                <details>
+                  <summary className="cursor-pointer text-[var(--ink-soft)]">
+                    Mensagem
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-[#fffdf8] p-3">
+                    {link.text}
+                  </pre>
+                </details>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="card space-y-3 p-5">
+        <h3 className="font-semibold">Domínios liberados (whitelist)</h3>
+        <p className="text-sm text-[var(--ink-soft)]">
+          Links destes domínios passam direto, sem aviso. Vale também para os
+          subdomínios (youtube.com libera m.youtube.com).
+        </p>
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run("allowed", async () => {
+              const res = await fetch("/api/moderation/allowed", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ domain: allowedDomain }),
+              });
+              const data = await res.json();
+              if (!res.ok) throw new Error(data.error || "Falha ao adicionar");
+              setAllowedDomain("");
+            });
+          }}
+        >
+          <input
+            className="field"
+            value={allowedDomain}
+            onChange={(e) => setAllowedDomain(e.target.value)}
+            placeholder="ex.: youtube.com"
+          />
+          <button type="submit" className="btn btn-secondary text-sm" disabled={!!loading}>
+            Adicionar
+          </button>
+        </form>
+        <ul className="space-y-2 text-sm">
+          {allowedDomains.length === 0 && (
+            <li className="text-[var(--ink-soft)]">Nenhum domínio liberado.</li>
+          )}
+          {allowedDomains.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3">
+              <span>{item.domain}</span>
+              <button
+                type="button"
+                className="btn btn-danger text-sm"
+                onClick={() =>
+                  run(`allowed-${item.id}`, async () => {
+                    const res = await fetch(`/api/moderation/allowed/${item.id}`, {
+                      method: "DELETE",
+                    });
+                    if (!res.ok) throw new Error("Falha ao remover");
+                  })
+                }
+              >
+                Remover
+              </button>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="card space-y-3 p-5">

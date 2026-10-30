@@ -28,5 +28,7 @@ export async function POST(request: Request) {
     create: { domain },
     update: {},
   });
+  await prisma.allowedDomain.deleteMany({ where: { domain } });
+  await prisma.unknownLink.deleteMany({ where: { domain } });
   return NextResponse.json(saved, { status: 201 });
 }
