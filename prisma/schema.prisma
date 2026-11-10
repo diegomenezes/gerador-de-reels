@@ -17,6 +17,8 @@ enum TopicStatus {
 enum TopicKind {
   question
   polemic
+  viral
+  youtube
 }
 
 model Group {
@@ -67,6 +69,8 @@ model TopicExample {
   topicId   String
   topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
   text      String
+  // vídeo de referência (ideias vindas de TikTok, Reels e YouTube)
+  url       String?
   createdAt DateTime @default(now())
 }
 
@@ -172,5 +176,37 @@ model JobRun {
   messagesIn    Int       @default(0)
   messagesKept  Int       @default(0)
   topicsCreated Int       @default(0)
+  videosIn      Int       @default(0)
   error         String?
+}
+
+// Fontes de ideias e busca de vídeos virais (linha única "default")
+model AppSettings {
+  id             String   @id @default("default")
+  groupSource    Boolean  @default(true)
+  viralSource    Boolean  @default(true)
+  // termos por idioma em JSON: { "pt": [...], "en": [...], "es": [...] }
+  viralTerms     String   @default("{\"pt\":[\"impressão 3d\"],\"en\":[\"3d printing\"],\"es\":[\"impresión 3d\"]}")
+  viralPerSearch Int      @default(10)
+  updatedAt      DateTime @updatedAt
+}
+
+model ViralVideo {
+  id          String    @id @default(cuid())
+  platform    String // tiktok | instagram | youtube | youtube-long
+  externalId  String
+  url         String
+  caption     String
+  author      String?
+  views       Int       @default(0)
+  likes       Int       @default(0)
+  comments    Int       @default(0)
+  language    String
+  term        String
+  publishedAt DateTime?
+  fetchedAt   DateTime  @default(now())
+  usedAt      DateTime?
+
+  @@unique([platform, externalId])
+  @@index([fetchedAt])
 }

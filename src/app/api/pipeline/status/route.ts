@@ -24,6 +24,7 @@ export async function GET(request: Request) {
       messagesIn: job.messagesIn,
       messagesKept: job.messagesKept,
       topicsCreated: job.topicsCreated,
+      videosIn: job.videosIn,
       error: job.error,
     },
   });

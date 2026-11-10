@@ -8,8 +8,17 @@ import {
   generateHookSuggestions,
   generateInstagramCaption,
   generateReelScript,
+  generateViralIdeas,
 } from "./openai";
 import { readToneOfVoice } from "./tone";
+import {
+  collectVideos,
+  formatCount,
+  getSettings,
+  parseTerms,
+  pickVideosForIdeas,
+  PLATFORM_LABEL,
+} from "./viral";
 
 export type PipelineResult = {
   jobId: string;
@@ -36,8 +45,191 @@ async function setStage(
   });
 }
 
+export type PipelineMode = "daily" | "youtube";
+
+const SHORT_PLATFORMS = ["tiktok", "instagram", "youtube"] as const;
+
+async function coveredThemes() {
+  return prisma.topic.findMany({
+    where: {
+      OR: [
+        { scripts: { some: {} } },
+        { status: { in: ["scripted", "recorded"] } },
+      ],
+    },
+    select: { title: true, summary: true },
+    orderBy: { updatedAt: "desc" },
+    take: 80,
+  });
+}
+
+/** Dúvidas e polêmicas das mensagens do grupo nas últimas 24h. */
+async function runGroupSource(jobId: string, dateBucket: string) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const groups = await prisma.group.findMany({ where: { active: true } });
+  if (groups.length === 0) {
+    throw new Error("Nenhum grupo ativo cadastrado");
+  }
+
+  const messagesIn = await prisma.message.count({
+    where: { timestamp: { gte: since }, group: { active: true } },
+  });
+  await setStage(jobId, "Filtrando dúvidas do grupo...", { messagesIn });
+
+  const recent = await prisma.message.findMany({
+    where: { timestamp: { gte: since }, group: { active: true } },
+    select: { text: true },
+    orderBy: { timestamp: "desc" },
+    take: 5000,
+  });
+
+  const compact = compactMessages(
+    recent.map((m) => m.text),
+    120,
+  );
+  const messagesKept = compact.reduce((acc, m) => acc + m.count, 0);
+
+  await setStage(jobId, "Agrupando dúvidas e polêmicas...", {
+    messagesIn,
+    messagesKept,
+  });
+
+  const covered = await coveredThemes();
+  const [questions, polemics] = await Promise.all([
+    clusterDoubts(compact, 15, covered),
+    clusterPolemics(compact, 8, covered),
+  ]);
+  const clustered = [
+    ...questions.map((topic) => ({ ...topic, kind: "question" as const })),
+    ...polemics.map((topic) => ({ ...topic, kind: "polemic" as const })),
+  ];
+
+  await setStage(jobId, "Salvando dúvidas...", { messagesIn, messagesKept });
+  const seen = await titleFilter(dateBucket, covered);
+
+  let topicsCreated = 0;
+  for (const topic of clustered) {
+    if (!seen.accept(topic.title)) continue;
+    await prisma.topic.create({
+      data: {
+        title: topic.title,
+        summary: topic.summary,
+        frequency: topic.frequency,
+        score: topic.score,
+        dateBucket,
+        status: "new",
+        kind: topic.kind,
+        examples: {
+          create: topic.examples.slice(0, 5).map((text) => ({ text })),
+        },
+      },
+    });
+    topicsCreated += 1;
+  }
+  return { messagesIn, messagesKept, topicsCreated };
+}
+
+/** Evita repetir ideia do mesmo dia ou tema que já tem roteiro. */
+async function titleFilter(dateBucket: string, covered: { title: string }[]) {
+  const existingToday = await prisma.topic.findMany({
+    where: { dateBucket },
+    select: { title: true },
+  });
+  const seenTitles = new Set(existingToday.map((t) => t.title.trim().toLowerCase()));
+  const coveredTitles = covered.map((topic) => topic.title);
+  return {
+    accept(title: string) {
+      const key = title.trim().toLowerCase();
+      if (seenTitles.has(key)) return false;
+      if (coveredTitles.some((t) => sameReelTheme(title, t))) return false;
+      seenTitles.add(key);
+      coveredTitles.push(title);
+      return true;
+    },
+  };
+}
+
+/** Busca vídeos no Apify e transforma os mais fortes em ideias. */
+async function runVideoSource(
+  jobId: string,
+  dateBucket: string,
+  mode: "short" | "long",
+  progress: { topicsCreated: number },
+) {
+  const settings = await getSettings();
+  const terms = parseTerms(settings.viralTerms);
+  const platforms = mode === "long" ? (["youtube-long"] as const) : SHORT_PLATFORMS;
+
+  await setStage(jobId, "Buscando vídeos...");
+  const { found, errors } = await collectVideos(
+    [...platforms],
+    terms,
+    settings.viralPerSearch,
+    (label) => setStage(jobId, `Buscando vídeos · ${label}`),
+  );
+  await prisma.jobRun.update({ where: { id: jobId }, data: { videosIn: found } });
+  if (errors.length > 0) console.error("[virais]", errors.join(" | "));
+
+  await setStage(jobId, "Gerando ideias a partir dos vídeos...");
+  const videos = await pickVideosForIdeas([...platforms], mode === "long" ? 30 : 20, 7);
+  if (videos.length === 0) return { found, topicsCreated: 0, errors };
+
+  const covered = await coveredThemes();
+  const ideas = await generateViralIdeas(
+    videos.map((v) => ({
+      platform: PLATFORM_LABEL[v.platform] ?? v.platform,
+      language: v.language,
+      views: v.views,
+      likes: v.likes,
+      caption: v.caption,
+    })),
+    mode === "long" ? 8 : 10,
+    covered,
+    mode,
+  );
+
+  const seen = await titleFilter(dateBucket, covered);
+  let topicsCreated = 0;
+  const used = new Set<string>();
+  for (const idea of ideas) {
+    if (!seen.accept(idea.title)) continue;
+    const sources = idea.sources.map((n) => videos[n - 1]).filter(Boolean);
+    sources.forEach((v) => used.add(v.id));
+    await prisma.topic.create({
+      data: {
+        title: idea.title,
+        summary: idea.summary,
+        frequency: sources.length,
+        score: idea.score,
+        dateBucket,
+        status: "new",
+        kind: mode === "long" ? "youtube" : "viral",
+        examples: {
+          create: sources.slice(0, 5).map((v) => ({
+            text: `${PLATFORM_LABEL[v.platform] ?? v.platform} · ${v.language.toUpperCase()} · ${formatCount(v.views)} views · ${v.caption.replace(/\s+/g, " ").slice(0, 160)}`,
+            url: v.url,
+          })),
+        },
+      },
+    });
+    topicsCreated += 1;
+    progress.topicsCreated += 1;
+    await setStage(jobId, "Gerando ideias a partir dos vídeos...", {
+      topicsCreated: progress.topicsCreated,
+    });
+  }
+  if (used.size > 0) {
+    await prisma.viralVideo.updateMany({
+      where: { id: { in: [...used] } },
+      data: { usedAt: new Date() },
+    });
+  }
+  return { found, topicsCreated, errors };
+}
+
 export async function runDailyPipeline(
   existingJobId?: string,
+  mode: PipelineMode = "daily",
 ): Promise<PipelineResult> {
   const job = existingJobId
     ? await prisma.jobRun.update({
@@ -48,104 +240,49 @@ export async function runDailyPipeline(
         data: { running: true, stage: "Iniciando..." },
       });
 
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const dateBucket = format(new Date(), "yyyy-MM-dd");
-
+  const progress = { topicsCreated: 0 };
   let messagesIn = 0;
   let messagesKept = 0;
-  let topicsCreated = 0;
+  const errors: string[] = [];
+  let anySource = false;
+  let anySuccess = false;
 
   try {
-    const groups = await prisma.group.findMany({ where: { active: true } });
-    if (groups.length === 0) {
-      throw new Error("Nenhum grupo ativo cadastrado");
-    }
+    const settings = await getSettings();
 
-    messagesIn = await prisma.message.count({
-      where: { timestamp: { gte: since }, group: { active: true } },
-    });
-    await setStage(job.id, "Lendo mensagens recebidas...", { messagesIn });
-    await setStage(job.id, "Filtrando dúvidas...", { messagesIn });
-
-    const recent = await prisma.message.findMany({
-      where: { timestamp: { gte: since }, group: { active: true } },
-      select: { text: true },
-      orderBy: { timestamp: "desc" },
-      take: 5000,
-    });
-
-    const compact = compactMessages(
-      recent.map((m) => m.text),
-      120,
-    );
-    messagesKept = compact.reduce((acc, m) => acc + m.count, 0);
-
-    await setStage(job.id, "Agrupando dúvidas e polêmicas...", {
-      messagesIn,
-      messagesKept,
-    });
-
-    const covered = await prisma.topic.findMany({
-      where: {
-        OR: [
-          { scripts: { some: {} } },
-          { status: { in: ["scripted", "recorded"] } },
-        ],
-      },
-      select: { title: true, summary: true },
-      orderBy: { updatedAt: "desc" },
-      take: 80,
-    });
-
-    const [questions, polemics] = await Promise.all([
-      clusterDoubts(compact, 15, covered),
-      clusterPolemics(compact, 8, covered),
-    ]);
-    const clustered = [
-      ...questions.map((topic) => ({ ...topic, kind: "question" as const })),
-      ...polemics.map((topic) => ({ ...topic, kind: "polemic" as const })),
-    ];
-
-    const existingToday = await prisma.topic.findMany({
-      where: { dateBucket },
-      select: { title: true },
-    });
-    const seenTitles = new Set(
-      existingToday.map((t) => t.title.trim().toLowerCase()),
-    );
-
-    await setStage(job.id, "Salvando dúvidas...", {
-      messagesIn,
-      messagesKept,
-    });
-
-    const coveredTitles = covered.map((topic) => topic.title);
-
-    for (const topic of clustered) {
-      const key = topic.title.trim().toLowerCase();
-      if (seenTitles.has(key)) continue;
-      if (coveredTitles.some((title) => sameReelTheme(topic.title, title))) {
-        continue;
+    if (mode === "youtube") {
+      anySource = true;
+      const result = await runVideoSource(job.id, dateBucket, "long", progress);
+      anySuccess = true;
+      if (result.errors.length) errors.push(...result.errors.slice(0, 3));
+    } else {
+      if (settings.groupSource) {
+        anySource = true;
+        try {
+          const result = await runGroupSource(job.id, dateBucket);
+          messagesIn = result.messagesIn;
+          messagesKept = result.messagesKept;
+          progress.topicsCreated += result.topicsCreated;
+          anySuccess = true;
+        } catch (err) {
+          errors.push(`Grupo: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-      seenTitles.add(key);
-      coveredTitles.push(topic.title);
-
-      await prisma.topic.create({
-        data: {
-          title: topic.title,
-          summary: topic.summary,
-          frequency: topic.frequency,
-          score: topic.score,
-          dateBucket,
-          status: "new",
-          kind: topic.kind,
-          examples: {
-            create: topic.examples.slice(0, 5).map((text) => ({ text })),
-          },
-        },
-      });
-      topicsCreated += 1;
+      if (settings.viralSource) {
+        anySource = true;
+        try {
+          const result = await runVideoSource(job.id, dateBucket, "short", progress);
+          anySuccess = true;
+          if (result.errors.length) errors.push(...result.errors.slice(0, 3));
+        } catch (err) {
+          errors.push(`Vídeos: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (!anySource) throw new Error("Ligue pelo menos uma fonte de ideias em Config");
     }
+
+    if (!anySuccess) throw new Error(errors.join(" | "));
 
     await prisma.jobRun.update({
       where: { id: job.id },
@@ -156,7 +293,9 @@ export async function runDailyPipeline(
         stage: "Concluído",
         messagesIn,
         messagesKept,
-        topicsCreated,
+        topicsCreated: progress.topicsCreated,
+        // fonte que falhou junto com outra que deu certo fica registrada como aviso
+        error: errors.length ? errors.join(" | ").slice(0, 1000) : null,
       },
     });
 
@@ -165,7 +304,7 @@ export async function runDailyPipeline(
       success: true,
       messagesIn,
       messagesKept,
-      topicsCreated,
+      topicsCreated: progress.topicsCreated,
       stage: "Concluído",
     };
   } catch (err) {
@@ -179,8 +318,8 @@ export async function runDailyPipeline(
         stage: "Erro",
         messagesIn,
         messagesKept,
-        topicsCreated,
-        error,
+        topicsCreated: progress.topicsCreated,
+        error: error.slice(0, 1000),
       },
     });
     return {
@@ -188,7 +327,7 @@ export async function runDailyPipeline(
       success: false,
       messagesIn,
       messagesKept,
-      topicsCreated,
+      topicsCreated: progress.topicsCreated,
       error,
       stage: "Erro",
     };
@@ -284,7 +423,7 @@ export async function createScriptForTopic(
     examples,
     tone,
     userNotes,
-    kind: topic.kind === "polemic" ? "polemic" : "question",
+    kind: topic.kind,
   });
 
   const hooks = keepHooks
@@ -296,6 +435,7 @@ export async function createScriptForTopic(
           examples,
           hookModels,
           polemic: topic.kind === "polemic",
+          kind: topic.kind,
         }),
       );
 
@@ -343,6 +483,7 @@ export async function regenerateHooksForTopic(topicId: string) {
     examples: topic.examples.map((e) => e.text),
     hookModels,
     polemic: topic.kind === "polemic",
+    kind: topic.kind,
   });
 
   return prisma.script.update({
@@ -381,6 +522,7 @@ export async function generateCaptionForTopic(topicId: string) {
     scriptContent: script.content,
     tone,
     hooks,
+    kind: topic.kind,
   });
 
   return prisma.script.update({

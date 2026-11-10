@@ -28,7 +28,7 @@ export default async function HomePage() {
     kind: topic.kind,
     hasScript: topic.scripts.length > 0,
     userNotes: topic.userNotes || "",
-    examples: topic.examples.map((ex) => ({ id: ex.id, text: ex.text })),
+    examples: topic.examples.map((ex) => ({ id: ex.id, text: ex.text, url: ex.url })),
   }));
 
   return (
@@ -43,10 +43,10 @@ export default async function HomePage() {
             })}
           </p>
           <h2 className="mt-1 text-3xl font-semibold tracking-tight">
-            Perguntas
+            Ideias
           </h2>
           <p className="mt-2 max-w-xl text-[var(--ink-soft)]">
-            Perguntas e polêmicos ficam aqui. Só saem quando você descartar.
+            Perguntas e polêmicos do grupo, vídeos virais e ideias para YouTube. Só saem quando você descartar.
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
@@ -57,7 +57,7 @@ export default async function HomePage() {
 
       {cards.length === 0 ? (
         <div className="card p-6 text-[var(--ink-soft)]">
-          Nenhuma pergunta ainda. Adicione uma manualmente ou rode o job em{" "}
+          Nenhuma ideia ainda. Adicione uma manualmente ou rode o job em{" "}
           <strong>Config</strong>.
         </div>
       ) : (

@@ -13,6 +13,7 @@ type Job = {
   messagesIn: number;
   messagesKept: number;
   topicsCreated: number;
+  videosIn?: number;
   error: string | null;
 };
 
@@ -76,7 +77,7 @@ export function ConfigPanel({
           setBusy(null);
           if (data.job.success) {
             setInfo(
-              `OK: ${data.job.messagesIn} msgs lidas, ${data.job.messagesKept} úteis, ${data.job.topicsCreated} dúvidas.`,
+              `OK: ${data.job.messagesIn} msgs lidas, ${data.job.videosIn ?? 0} vídeos lidos, ${data.job.topicsCreated} ideias novas.${data.job.error ? ` Aviso: ${data.job.error}` : ""}`,
             );
           } else {
             setInfo(data.job.error || "Pipeline falhou.");
@@ -117,11 +118,19 @@ export function ConfigPanel({
     );
   }
 
-  async function runNow() {
-    setInfo("Iniciando job... isso pode levar 1–3 minutos.");
+  async function runNow(mode: "daily" | "youtube" = "daily") {
+    setInfo(
+      mode === "youtube"
+        ? "Buscando vídeos longos no YouTube... pode levar alguns minutos."
+        : "Iniciando job... com a busca de vídeos pode levar alguns minutos.",
+    );
     setBusy("run");
     try {
-      const res = await fetch("/api/pipeline/run", { method: "POST" });
+      const res = await fetch("/api/pipeline/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setBusy(null);
@@ -153,6 +162,10 @@ export function ConfigPanel({
     <div className="space-y-6">
       <section className="card space-y-3 p-5">
         <h2 className="text-lg font-semibold">Job diário</h2>
+        <p className="text-sm text-[var(--ink-soft)]">
+          Roda sozinho 1x por dia com as fontes ligadas acima. As ideias para YouTube só
+          rodam pelo botão.
+        </p>
         {liveJob ? (
           <div className="space-y-1 text-sm text-[var(--ink-soft)]">
             <p>
@@ -179,7 +192,7 @@ export function ConfigPanel({
             </p>
             <p>
               Mensagens: {liveJob.messagesIn} | Úteis: {liveJob.messagesKept} |
-              Dúvidas: {liveJob.topicsCreated}
+              Vídeos: {liveJob.videosIn ?? 0} | Ideias: {liveJob.topicsCreated}
             </p>
             {liveJob.error && (
               <p className="text-[var(--warn)]">{liveJob.error}</p>
@@ -203,9 +216,17 @@ export function ConfigPanel({
             type="button"
             className="btn btn-primary"
             disabled={!!busy}
-            onClick={runNow}
+            onClick={() => runNow()}
           >
             {busy === "run" ? `Rodando... ${elapsed}s` : "Rodar agora"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!!busy}
+            onClick={() => runNow("youtube")}
+          >
+            Ideias para YouTube (vídeos longos)
           </button>
           <button
             type="button"

@@ -11,18 +11,20 @@ type TopicCard = {
   score: number;
   dateBucket: string;
   status: string;
-  kind: "question" | "polemic";
+  kind: "question" | "polemic" | "viral" | "youtube";
   hasScript: boolean;
   userNotes: string;
-  examples: { id: string; text: string }[];
+  examples: { id: string; text: string; url: string | null }[];
 };
 
 type Filter = "without" | "with" | "all";
-type KindFilter = "question" | "polemic" | "all";
+type KindFilter = "question" | "polemic" | "viral" | "youtube" | "all";
 
 const KIND_FILTERS: { id: KindFilter; label: string }[] = [
   { id: "question", label: "Perguntas" },
   { id: "polemic", label: "Polêmicos" },
+  { id: "viral", label: "Virais" },
+  { id: "youtube", label: "YouTube" },
   { id: "all", label: "Todas" },
 ];
 
@@ -47,7 +49,7 @@ function formatDay(dateBucket: string) {
 
 export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
   const [filter, setFilter] = useState<Filter>("without");
-  const [kind, setKind] = useState<KindFilter>("question");
+  const [kind, setKind] = useState<KindFilter>("all");
   const [day, setDay] = useState("all");
 
   const byKind = useMemo(() => {
@@ -82,6 +84,8 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
     return {
       question: topics.filter((t) => t.kind === "question").length,
       polemic: topics.filter((t) => t.kind === "polemic").length,
+      viral: topics.filter((t) => t.kind === "viral").length,
+      youtube: topics.filter((t) => t.kind === "youtube").length,
       all: topics.length,
     };
   }, [topics]);
@@ -170,7 +174,13 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
                   {topic.kind === "polemic" && (
                     <span className="badge badge-warn">Polêmico</span>
                   )}
-                  <span className="badge">{topic.frequency}x</span>
+                  {topic.kind === "viral" && <span className="badge">Viral</span>}
+                  {topic.kind === "youtube" && (
+                    <span className="badge">YouTube longo</span>
+                  )}
+                  {(topic.kind === "question" || topic.kind === "polemic") && (
+                    <span className="badge">{topic.frequency}x</span>
+                  )}
                   <span
                     className={`badge ${
                       topic.hasScript
@@ -190,7 +200,20 @@ export function TopicsBoard({ topics }: { topics: TopicCard[] }) {
               {topic.examples.length > 0 && (
                 <ul className="mt-3 space-y-1 text-sm text-[var(--ink-soft)]">
                   {topic.examples.slice(0, 3).map((ex) => (
-                    <li key={ex.id}>“{ex.text}”</li>
+                    <li key={ex.id}>
+                      {ex.url ? (
+                        <a
+                          href={ex.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline decoration-dotted underline-offset-2 hover:text-[var(--ink)]"
+                        >
+                          {ex.text}
+                        </a>
+                      ) : (
+                        <>“{ex.text}”</>
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}

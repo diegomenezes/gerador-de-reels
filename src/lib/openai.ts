@@ -1,6 +1,17 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { CompactMessage } from "./filter";
+import { NO_SLOP_RULES, stripSlop } from "./no-slop";
+
+export type IdeaKind = "question" | "polemic" | "viral" | "youtube";
+
+/** Rótulo dos exemplos de cada tipo de ideia nos prompts. */
+function examplesLabel(kind?: IdeaKind) {
+  if (kind === "viral" || kind === "youtube") {
+    return "Vídeos de referência (o que está indo bem nas redes)";
+  }
+  return "Exemplos reais do grupo";
+}
 
 /** Clustering, pesquisa web, legendas — barato e rápido */
 const MODEL_FAST = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -233,6 +244,7 @@ async function researchTopicFacts(input: {
   title: string;
   summary: string;
   examples: string[];
+  kind?: IdeaKind;
 }): Promise<string> {
   const client = getClient();
   const researchPrompt = `Pesquise na internet (obrigatório) se esta dúvida de impressão 3D faz sentido na prática e quais são os fatos corretos.
@@ -252,7 +264,7 @@ No item "O que NÃO falar", inclua explicitamente Z-offset se o tema for aderên
 Dúvida:
 Título: ${input.title}
 Resumo: ${input.summary}
-Exemplos do grupo:
+${examplesLabel(input.kind)}:
 ${input.examples.map((e) => `- ${e}`).join("\n")}
 
 Devolva um briefing técnico objetivo em português com:
@@ -327,6 +339,7 @@ export async function generateHookSuggestions(input: {
   examples: string[];
   hookModels: string;
   polemic?: boolean;
+  kind?: IdeaKind;
 }): Promise<string[]> {
   const client = getClient();
 
@@ -340,7 +353,8 @@ export async function generateHookSuggestions(input: {
         content: `Você cria ganchos fortes para a primeira frase/legenda de Reels no Instagram.
 Use os MODELOS DE GANCHOS como base de estruturas (adapte, não copie genérico sem contexto).
 Foque no tema específico. Português do Brasil. Sem markdown.
-${input.polemic ? "Este Reel é POLÊMICO: cada gancho tem que dividir opinião ou puxar comentário. Uma frase, um lado só. Sem tutorial." : "Foque na dúvida prática."}
+${input.polemic ? "Este Reel é POLÊMICO: cada gancho tem que dividir opinião ou puxar comentário. Uma frase, um lado só. Sem tutorial." : input.kind === "youtube" ? "Estes ganchos são TÍTULOS de vídeo longo no YouTube: curiosidade + benefício claro. Sem clickbait mentiroso, sem CAIXA ALTA inteira." : input.kind === "viral" ? "Esta ideia veio de vídeos que estão indo bem nas redes (inclusive fora do Brasil). O gancho é a promessa do vídeo, adaptada pro público brasileiro." : "Foque na dúvida prática."}
+${NO_SLOP_RULES}
 PROIBIDO metáfora/analogia forçada ("tipo palito de dente", "como sabão", "mais ... que ...").
 Direto e concreto: diga o problema real, sem comparar com objetos.
 ${NOMENCLATURE_RULES}
@@ -354,7 +368,7 @@ Responda só JSON: { "hooks": ["...", "..."] }`,
 
 Tema: ${input.title}
 Resumo: ${input.summary}
-Exemplos do grupo:
+${examplesLabel(input.kind)}:
 ${input.examples.map((e) => `- ${e}`).join("\n")}
 
 MODELOS DE GANCHOS (base de ideias/estruturas):
@@ -372,7 +386,7 @@ Exemplos do estilo desejado (curtos):
 
   const parsed = HooksSchema.parse(extractJson(content));
   return parsed.hooks
-    .map((h) => h.replace(/\*\*/g, "").trim())
+    .map((h) => stripSlop(h.replace(/\*\*/g, "")).trim())
     .filter(Boolean)
     .map(clampHookLength)
     .filter((h) => h.length >= 3);
@@ -391,6 +405,7 @@ export async function generateInstagramCaption(input: {
   scriptContent: string;
   tone: string;
   hooks: string[];
+  kind?: IdeaKind;
 }): Promise<string> {
   const client = getClient();
 
@@ -400,7 +415,7 @@ export async function generateInstagramCaption(input: {
     messages: [
       {
         role: "system",
-        content: `Você escreve legendas de Instagram (Reels) no tom do criador.
+        content: `${input.kind === "youtube" ? "Você escreve a DESCRIÇÃO de um vídeo longo do YouTube no tom do criador (as regras abaixo valem igual, com 3 a 6 frases)." : "Você escreve legendas de Instagram (Reels) no tom do criador."}
 
 TOM DE VOZ:
 ${input.tone}
@@ -413,7 +428,8 @@ Regras:
 - Termine a legenda com as 3 hashtags na última linha, separadas por espaço
 - Hashtags relevantes ao tema (impressão 3D / Bambu quando fizer sentido)
 - Não use mais nem menos que 3 hashtags
-${NOMENCLATURE_RULES}`
+${NOMENCLATURE_RULES}
+${NO_SLOP_RULES}`
       },
       {
         role: "user",
@@ -436,7 +452,7 @@ Devolva só a legenda pronta para colar.`,
   if (!content) throw new Error("OpenAI não retornou a legenda");
 
   // Não usar /^#\s+/ aqui — isso apagaria linhas de hashtag do Instagram
-  return content.replace(/\*\*/g, "").trim();
+  return stripSlop(content.replace(/\*\*/g, "")).trim();
 }
 
 export async function generateReelScript(input: {
@@ -445,8 +461,9 @@ export async function generateReelScript(input: {
   examples: string[];
   tone: string;
   userNotes?: string;
-  kind?: "question" | "polemic";
+  kind?: IdeaKind;
 }): Promise<{ content: string; model: string }> {
+  if (input.kind === "youtube") return generateYoutubeOutline(input);
   const client = getClient();
   const research = await researchTopicFacts(input);
 
@@ -471,7 +488,14 @@ ${
 - No meio, pode chamar comentário ("comenta a marca...", "conta o susto que você já levou")
 - Não vire tutorial passo a passo
 - Anti-guru, pé no chão`
-    : `Fluxo interno (NÃO escreva esses rótulos no texto final):
+    : input.kind === "viral"
+      ? `FORMATO VIRAL ADAPTADO (prioridade alta):
+- A ideia veio de vídeos que estão indo bem no TikTok, Reels ou Shorts, alguns em inglês ou espanhol
+- NÃO traduza nem copie o vídeo de referência: pegue o que fez ele funcionar e faça a versão do criador, pro público brasileiro
+- Tem que ser algo que o criador consegue gravar com a impressora dele
+- Não cite o vídeo, o perfil nem a rede de onde veio
+- Fluxo interno (NÃO escreva os rótulos): gancho forte → o que a pessoa vai ver → por que funciona → CTA`
+      : `Fluxo interno (NÃO escreva esses rótulos no texto final):
 gancho → problema → solução em 2-3 pontos → CTA`
 }
 
@@ -518,7 +542,9 @@ Outras regras:
 - Português do Brasil
 - Texto falado, natural
 - Seja específico e útil
-- Máximo ~220 palavras`,
+- Máximo ~220 palavras
+
+${NO_SLOP_RULES}`,
       },
       {
         role: "user",
@@ -526,7 +552,7 @@ Outras regras:
 
 Título: ${input.title}
 Resumo: ${input.summary}
-Exemplos reais do grupo:
+${examplesLabel(input.kind)}:
 ${input.examples.map((e) => `- ${e}`).join("\n")}
 
 IDEIAS DO CRIADOR (prioridade alta — use no roteiro):
@@ -546,7 +572,7 @@ ${input.kind === "polemic" ? "Este é um Reel POLÊMICO: um lado só, comentári
 
   return {
     content: ensureFixedCta(
-      stripForcedMetaphors(cleanTeleprompterText(content)),
+      stripSlop(stripForcedMetaphors(cleanTeleprompterText(content))),
       input.title,
       input.summary,
     ),
@@ -610,6 +636,185 @@ function stripForcedMetaphors(text: string): string {
     .replace(/[ \t]+([,.!?])/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// --- Ideias a partir de vídeos que estão indo bem (TikTok, Reels, Shorts, YouTube) ---
+
+const ViralIdeasSchema = z.object({
+  ideas: z.array(
+    z.object({
+      title: z.string().min(3),
+      summary: z.string().min(3),
+      score: z.number().min(0).max(100),
+      sources: z.array(z.number().int()).min(1).max(5),
+    }),
+  ),
+});
+
+export type ViralIdea = z.infer<typeof ViralIdeasSchema>["ideas"][number];
+
+export type ViralVideoInput = {
+  platform: string;
+  language: string;
+  views: number;
+  likes: number;
+  caption: string;
+};
+
+export async function generateViralIdeas(
+  videos: ViralVideoInput[],
+  max: number,
+  covered: CoveredTheme[],
+  format: "short" | "long",
+): Promise<ViralIdea[]> {
+  if (videos.length === 0) return [];
+  const client = getClient();
+  const catalog = videos
+    .map(
+      (v, i) =>
+        `${i + 1}. [${v.platform} · ${v.language.toUpperCase()} · ${v.views} views · ${v.likes} likes] ${v.caption.replace(/\s+/g, " ").slice(0, 300)}`,
+    )
+    .join("\n");
+
+  const formatRules =
+    format === "long"
+      ? `Formato: VÍDEO LONGO de YouTube (8 a 20 minutos) para o canal do criador.
+- Cada ideia tem que render um vídeo inteiro: teste, comparação, projeto do começo ao fim, guia completo, desafio
+- title = título do vídeo no YouTube, em português, até 70 caracteres`
+      : `Formato: vídeo CURTO (Reels/Shorts/TikTok, até 90 segundos).
+- Cada ideia é UM vídeo com uma coisa só: uma peça, um truque, um antes/depois, um teste rápido
+- title = a primeira frase falada do vídeo (o gancho), em português, curta`;
+
+  const completion = await client.chat.completions.create({
+    model: MODEL_QUALITY,
+    temperature: 0.6,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `Você é o produtor de um criador brasileiro de impressão 3D (ecossistema Bambu Lab). Você olha vídeos que estão indo bem em várias redes e idiomas e tira ideias que ELE pode gravar. Responda só JSON válido.`,
+      },
+      {
+        role: "user",
+        content: `Abaixo estão vídeos de impressão 3D que estão indo bem (TikTok, Reels, Shorts, YouTube), em português, inglês e espanhol.
+Crie até ${max} ideias de vídeo para o criador gravar.
+
+${formatRules}
+
+Regras:
+- Procure o PADRÃO que fez os vídeos funcionarem (formato, tipo de peça, curiosidade, erro, resultado visual) e não só o assunto
+- Ideia nova pro público brasileiro: não é tradução do vídeo de lá
+- Tem que ser gravável por um criador com impressora Bambu Lab em casa
+- Junte vídeos parecidos numa ideia só; ideias diferentes não podem ser o mesmo vídeo com outras palavras
+- Prefira o que tem mais views e likes, mas um vídeo menor com formato muito bom também vale
+- summary = 2 frases: o que o vídeo mostra e por que deve funcionar (cite o padrão que você viu)
+- score = potencial de viralizar no Brasil (0-100)
+- sources = números (da lista) dos vídeos que inspiraram a ideia, do mais forte pro mais fraco
+${coveredThemesBlock(covered)}
+${NO_SLOP_RULES}
+
+Formato:
+{ "ideas": [ { "title": "...", "summary": "...", "score": 80, "sources": [3, 7] } ] }
+
+Vídeos:
+${catalog}`,
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error("OpenAI não retornou as ideias dos vídeos");
+  const parsed = ViralIdeasSchema.parse(extractJson(content));
+  return parsed.ideas
+    .map((idea) => ({
+      ...idea,
+      title: stripSlop(idea.title).trim(),
+      summary: stripSlop(idea.summary).trim(),
+      sources: idea.sources.filter((n) => n >= 1 && n <= videos.length),
+    }))
+    .filter((idea) => idea.sources.length > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, max);
+}
+
+/** Estrutura de vídeo longo do YouTube (não é teleprompter de Reel). */
+async function generateYoutubeOutline(input: {
+  title: string;
+  summary: string;
+  examples: string[];
+  tone: string;
+  userNotes?: string;
+}): Promise<{ content: string; model: string }> {
+  const client = getClient();
+  const research = await researchTopicFacts({ ...input, kind: "youtube" });
+
+  const completion = await client.chat.completions.create({
+    model: MODEL_QUALITY,
+    temperature: 0.55,
+    messages: [
+      {
+        role: "system",
+        content: `Você monta a estrutura de vídeos longos (8 a 20 minutos) para o canal de YouTube de um criador de impressão 3D, no tom de voz dele.
+
+TOM DE VOZ:
+${input.tone}
+
+Entregue exatamente nesta ordem, em texto simples (sem markdown, sem ** nem #), com uma linha em branco entre os blocos:
+
+TÍTULOS
+3 opções de título, uma por linha, até 70 caracteres cada.
+
+THUMBNAIL
+1 a 2 frases: o que aparece na imagem e o texto curto (até 4 palavras) da thumb.
+
+ABERTURA (primeiros 30 segundos, texto falado)
+O texto que ele fala na abertura: promessa clara do vídeo e por que ficar até o fim. Sem "fala pessoal, tudo bem".
+
+CAPÍTULOS
+De 4 a 7 capítulos. Para cada um: "1. Nome do capítulo" e embaixo 2 a 4 linhas do que mostrar e falar (o que gravar, o que imprimir, o que medir ou comparar).
+
+FECHAMENTO
+2 a 3 frases faladas para fechar, com o CTA: Digite CHAT nos comentários para entrar no meu grupo de WhatsApp onde falamos sobre impressão 3d.
+
+Regras:
+- Português do Brasil
+- Use o BRIEFING DE PESQUISA como fonte da verdade; não invente menus, temperaturas ou recursos
+- A ideia veio de vídeos de referência; não copie, faça a versão do criador
+- Se houver IDEIAS DO CRIADOR, use
+${NOMENCLATURE_RULES}
+${BAMBU_CONTEXT_RULES}
+
+${NO_SLOP_RULES}`,
+      },
+      {
+        role: "user",
+        content: `Monte a estrutura do vídeo longo:
+
+Título da ideia: ${input.title}
+Resumo: ${input.summary}
+${examplesLabel("youtube")}:
+${input.examples.map((e) => `- ${e}`).join("\n")}
+
+IDEIAS DO CRIADOR:
+${input.userNotes?.trim() || "(nenhuma ideia extra)"}
+
+BRIEFING DE PESQUISA:
+${research}`,
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content?.trim();
+  if (!content) throw new Error("OpenAI não retornou a estrutura do vídeo");
+  return {
+    content: stripSlop(
+      content
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/^#{1,6}\s+/gm, "")
+        .replace(/\n{3,}/g, "\n\n"),
+    ).trim(),
+    model: MODEL_QUALITY,
+  };
 }
 
 export {

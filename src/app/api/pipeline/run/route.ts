@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { runDailyPipeline } from "@/lib/pipeline";
+import { runDailyPipeline, type PipelineMode } from "@/lib/pipeline";
 
 export const maxDuration = 300;
 
-export async function POST() {
-  const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => null)) as { mode?: string } | null;
+  const mode: PipelineMode = body?.mode === "youtube" ? "youtube" : "daily";
+  // a busca de vídeos no Apify pode levar vários minutos
+  const staleBefore = new Date(Date.now() - 30 * 60 * 1000);
   await prisma.jobRun.updateMany({
     where: { running: true, startedAt: { lt: staleBefore } },
     data: {
@@ -13,7 +16,7 @@ export async function POST() {
       success: false,
       stage: "Interrompido",
       finishedAt: new Date(),
-      error: "Job excedeu 10 minutos e foi marcado como interrompido.",
+      error: "Job excedeu 30 minutos e foi marcado como interrompido.",
     },
   });
 
@@ -36,7 +39,7 @@ export async function POST() {
   });
 
   // Roda em background para o front poder acompanhar o progresso
-  void runDailyPipeline(job.id);
+  void runDailyPipeline(job.id, mode);
 
   return NextResponse.json({
     jobId: job.id,
