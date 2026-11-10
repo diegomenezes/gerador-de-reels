@@ -87,7 +87,8 @@ async function runGroupSource(jobId: string, dateBucket: string) {
   });
 
   const compact = compactMessages(
-    recent.map((m) => m.text),
+    // emoji partido numa mensagem faz a OpenAI recusar o pedido inteiro
+    recent.map((m) => cleanText(m.text)),
     120,
   );
   const messagesKept = compact.reduce((acc, m) => acc + m.count, 0);

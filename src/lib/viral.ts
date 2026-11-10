@@ -172,7 +172,7 @@ function fromYouTube(item: Record<string, unknown>, platform: "youtube" | "youtu
   const id = str(item.id, url);
   if (!url || !id) return null;
   const title = str(item.title);
-  const description = str(item.text, item.description).slice(0, 400);
+  const description = cleanText(str(item.text, item.description), 400);
   return {
     platform,
     externalId: id,
@@ -273,10 +273,10 @@ export async function collectVideos(
   ignoreAuthors: string[],
   onProgress?: (label: string) => Promise<void> | void,
 ): Promise<{ found: number; errors: string[] }> {
-  if (platforms.length === 0) throw new Error("Ligue pelo menos uma rede em Config");
+  if (platforms.length === 0) throw new Error("Ligue pelo menos uma rede em Ajustes → Tendências");
   const ignored = new Set(ignoreAuthors);
   const searches = LANGS.flatMap(({ id }) => terms[id].map((term) => ({ lang: id, term })));
-  if (searches.length === 0) throw new Error("Cadastre pelo menos um termo de busca em Config");
+  if (searches.length === 0) throw new Error("Cadastre pelo menos um termo de busca em Ajustes → Tendências");
 
   const errors: string[] = [];
   let found = 0;

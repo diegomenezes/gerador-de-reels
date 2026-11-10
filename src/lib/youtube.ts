@@ -85,7 +85,8 @@ export async function searchYoutube(
             ? `https://www.youtube.com/shorts/${id}`
             : `https://www.youtube.com/watch?v=${id}`,
         title: String(snippet.title ?? ""),
-        description: String(snippet.description ?? "").slice(0, 400),
+        // corta por caractere para não partir emoji
+        description: Array.from(String(snippet.description ?? "")).slice(0, 400).join(""),
         channel: String(snippet.channelTitle ?? ""),
         views: Number(stats.viewCount) || 0,
         likes: Number(stats.likeCount) || 0,

@@ -89,7 +89,8 @@ export function compactMessages(
     if (existing) {
       existing.count += 1;
     } else {
-      map.set(key, { text: text.slice(0, 280), count: 1 });
+      // corta por caractere: partir um emoji deixa o pedido à OpenAI inválido
+      map.set(key, { text: Array.from(text).slice(0, 280).join(""), count: 1 });
     }
   }
 

@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import type { CompactMessage } from "./filter";
 import { NO_SLOP_RULES, stripSlop } from "./no-slop";
+import { cleanText } from "./viral";
 
 export type IdeaKind = "question" | "polemic" | "viral" | "youtube";
 
@@ -680,7 +681,7 @@ export async function generateViralIdeas(
   const catalog = videos
     .map(
       (v, i) =>
-        `${i + 1}. [${v.platform} · ${v.views} views · ${v.likes} likes] ${v.caption.replace(/\s+/g, " ").slice(0, 300)}`,
+        `${i + 1}. [${v.platform} · ${v.views} views · ${v.likes} likes] ${cleanText(v.caption.replace(/\s+/g, " "), 300)}`,
     )
     .join("\n");
 
