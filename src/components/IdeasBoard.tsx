@@ -16,7 +16,7 @@ export type IdeaCard = {
   kind: IdeaKind;
   hasScript: boolean;
   userNotes: string;
-  examples: { id: string; text: string; url: string | null }[];
+  examples: { id: string; text: string; url: string | null; transcript: string | null }[];
 };
 
 type ScriptFilter = "without" | "with" | "all";
@@ -50,7 +50,7 @@ function parseReference(text: string) {
   };
 }
 
-function Reference({ text, url }: { text: string; url: string }) {
+function Reference({ text, url, transcript }: { text: string; url: string; transcript: string | null }) {
   const ref = parseReference(text);
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[var(--line)] bg-white/60 px-3 py-2">
@@ -67,6 +67,12 @@ function Reference({ text, url }: { text: string; url: string }) {
       >
         Ver vídeo original ↗
       </a>
+      {transcript && (
+        <details className="w-full text-sm">
+          <summary className="cursor-pointer text-[var(--accent)]">O que foi falado no vídeo</summary>
+          <p className="mt-1 whitespace-pre-line text-[var(--ink-soft)]">{transcript}</p>
+        </details>
+      )}
     </li>
   );
 }
@@ -195,7 +201,7 @@ export function IdeasBoard({
                     </p>
                     <ul className="space-y-2">
                       {refs.map((ref) => (
-                        <Reference key={ref.id} text={ref.text} url={ref.url!} />
+                        <Reference key={ref.id} text={ref.text} url={ref.url!} transcript={ref.transcript} />
                       ))}
                     </ul>
                   </div>

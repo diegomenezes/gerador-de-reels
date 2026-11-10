@@ -21,7 +21,7 @@ export async function loadIdeas(kinds: Kind[]): Promise<IdeaCard[]> {
     kind: t.kind,
     hasScript: t.scripts.length > 0,
     userNotes: t.userNotes || "",
-    examples: t.examples.map((e) => ({ id: e.id, text: e.text, url: e.url })),
+    examples: t.examples.map((e) => ({ id: e.id, text: e.text, url: e.url, transcript: e.transcript })),
   }));
 }
 

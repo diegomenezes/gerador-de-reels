@@ -463,6 +463,21 @@ Devolva só a legenda pronta para colar.`,
   return stripSlop(content.replace(/\*\*/g, "")).trim();
 }
 
+/** O que foi falado nos vídeos de referência: conteúdo, nunca texto pra copiar. */
+function transcriptsBlock(transcripts?: string[]): string {
+  if (!transcripts?.length) return "";
+  return `O QUE FOI FALADO NOS VÍDEOS DE REFERÊNCIA (transcrição, pode estar em inglês ou espanhol):
+${transcripts.map((t) => `- ${t}`).join("\n")}
+
+Como usar a transcrição:
+- Use os argumentos, os exemplos e a ordem das ideias que fizeram o vídeo funcionar
+- Escreva tudo de novo na voz do criador, em português, como conversa. NÃO traduza frase por frase e não copie
+- Se algo da transcrição contradizer o BRIEFING DE PESQUISA, vale o briefing
+- Não cite o vídeo, o autor nem a rede
+
+`;
+}
+
 export async function generateReelScript(input: {
   title: string;
   summary: string;
@@ -470,6 +485,8 @@ export async function generateReelScript(input: {
   tone: string;
   userNotes?: string;
   kind?: IdeaKind;
+  /** fala dos vídeos de referência ("Gerar com a fala do vídeo") */
+  transcripts?: string[];
 }): Promise<{ content: string; model: string }> {
   if (input.kind === "youtube") return generateYoutubeOutline(input);
   const client = getClient();
@@ -566,7 +583,7 @@ Resumo: ${input.summary}
 ${examplesLabel(input.kind)}:
 ${input.examples.map((e) => `- ${e}`).join("\n")}
 
-IDEIAS DO CRIADOR (prioridade alta — use no roteiro):
+${transcriptsBlock(input.transcripts)}IDEIAS DO CRIADOR (prioridade alta — use no roteiro):
 ${input.userNotes?.trim() || "(nenhuma ideia extra)"}
 
 BRIEFING DE PESQUISA (internet / Bambu Lab / Bambu Studio):
@@ -813,6 +830,7 @@ async function generateYoutubeOutline(input: {
   examples: string[];
   tone: string;
   userNotes?: string;
+  transcripts?: string[];
 }): Promise<{ content: string; model: string }> {
   const client = getClient();
   const research = await researchTopicFacts({ ...input, kind: "youtube" });
@@ -869,7 +887,7 @@ Resumo: ${input.summary}
 ${examplesLabel("youtube")}:
 ${input.examples.map((e) => `- ${e}`).join("\n")}
 
-IDEIAS DO CRIADOR:
+${transcriptsBlock(input.transcripts)}IDEIAS DO CRIADOR:
 ${input.userNotes?.trim() || "(nenhuma ideia extra)"}
 
 BRIEFING DE PESQUISA:

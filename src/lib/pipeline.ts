@@ -11,6 +11,7 @@ import {
   generateViralIdeas,
 } from "./openai";
 import { readToneOfVoice } from "./tone";
+import { fetchTranscript } from "./transcript";
 import {
   cleanText,
   collectVideos,
@@ -390,9 +391,45 @@ export function startDailyPipelineWithRetries(): {
   };
 }
 
+/**
+ * Transcrição dos vídeos de referência (até 3), buscada uma vez e guardada.
+ * Falha de um vídeo não impede o roteiro; se nenhum tiver fala, avisa.
+ */
+async function transcriptsFor(
+  examples: { id: string; url: string | null; text: string; transcript: string | null }[],
+): Promise<string[]> {
+  const withUrl = examples.filter((e) => e.url).slice(0, 3);
+  if (withUrl.length === 0) throw new Error("Esta ideia não tem vídeo de referência");
+  const result: string[] = [];
+  for (const example of withUrl) {
+    // "" = já tentou e o vídeo não tem fala: não paga de novo
+    let transcript = example.transcript;
+    if (transcript === null) {
+      let failed = false;
+      transcript = await fetchTranscript(example.url!).catch((err) => {
+        failed = true;
+        console.error("[transcricao]", example.url, err instanceof Error ? err.message : err);
+        return null;
+      });
+      // erro de rede/Apify não grava nada, para tentar de novo depois
+      if (!failed) {
+        await prisma.topicExample.update({
+          where: { id: example.id },
+          data: { transcript: transcript ?? "" },
+        });
+      }
+    }
+    if (transcript) result.push(`${example.text.split(" · ")[0]}: ${transcript}`);
+  }
+  if (result.length === 0) {
+    throw new Error("Não consegui a fala de nenhum vídeo de referência (sem legenda ou áudio). Use o Gerar roteiro normal.");
+  }
+  return result;
+}
+
 export async function createScriptForTopic(
   topicId: string,
-  options?: { userNotes?: string },
+  options?: { userNotes?: string; withTranscript?: boolean },
 ) {
   const topic = await prisma.topic.findUnique({
     where: { id: topicId },
@@ -422,6 +459,7 @@ export async function createScriptForTopic(
   const previous = topic.scripts[0];
   const keepHooks = Boolean(previous);
   const examples = topic.examples.map((e) => e.text);
+  const transcripts = options?.withTranscript ? await transcriptsFor(topic.examples) : [];
 
   const [tone, hookModels] = await Promise.all([
     readToneOfVoice(),
@@ -435,6 +473,7 @@ export async function createScriptForTopic(
     tone,
     userNotes,
     kind: topic.kind,
+    transcripts,
   });
 
   const hooks = keepHooks

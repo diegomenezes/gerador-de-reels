@@ -136,6 +136,33 @@ export function TopicActions({
           </button>
         )}
 
+        {/* só ideias de vídeo: busca o que foi falado nos vídeos de referência (custa centavos) */}
+        {(kind === "viral" || kind === "youtube") && status !== "discarded" && (
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={!!loading}
+            title="Busca o que foi falado nos vídeos de referência e usa como base do conteúdo"
+            onClick={() =>
+              run("transcript", async () => {
+                const res = await fetch(`/api/topics/${topicId}/script`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userNotes, withTranscript: true }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Falha ao gerar");
+              })
+            }
+          >
+            {loading === "transcript"
+              ? "Ouvindo os vídeos + gerando..."
+              : hasScript
+                ? "Refazer com a fala do vídeo"
+                : "Gerar com a fala do vídeo"}
+          </button>
+        )}
+
         {hasScript && status !== "discarded" && (
           <button
             type="button"

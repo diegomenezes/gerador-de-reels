@@ -71,6 +71,8 @@ model TopicExample {
   text      String
   // vídeo de referência (ideias vindas de TikTok, Reels e YouTube)
   url       String?
+  // o que foi falado no vídeo de referência (buscado só quando pedido)
+  transcript String?
   createdAt DateTime @default(now())
 }
 
