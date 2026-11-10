@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { CompactMessage } from "./filter";
-import { NO_SLOP_RULES, stripSlop } from "./no-slop";
+import { findSlop, NO_SLOP_RULES, PERSONAL_VOICE, stripSlop } from "./no-slop";
 import { cleanText } from "./viral";
 
 export type IdeaKind = "question" | "polemic" | "viral" | "youtube";
@@ -481,10 +481,12 @@ export async function generateReelScript(input: {
     messages: [
       {
         role: "system",
-        content: `Você escreve roteiros de Instagram Reels de ~90 segundos no tom de voz do criador, prontos para teleprompter.
+        content: `Você escreve o que o criador vai FALAR olhando pra câmera num Reel (talking head), pronto pra teleprompter. Tem que soar como conversa dele, não como aula nem como texto.
 
-TOM DE VOZ:
+TOM DE VOZ DO CRIADOR (é a referência principal; em conflito com outra regra, vale isto):
 ${input.tone}
+
+${PERSONAL_VOICE}
 
 ${
   input.kind === "polemic"
@@ -503,9 +505,9 @@ ${
 - É vídeo FALADO para a câmera: nada de "olha essa peça que imprimi", "vou imprimir", "veja o timelapse"
 - Pode mencionar algo que ele segura na mão, mas o roteiro funciona só com a fala
 - Não cite o vídeo, o perfil nem a rede de onde veio
-- Fluxo interno (NÃO escreva os rótulos): gancho forte → o ponto principal → 2-3 argumentos ou passos concretos → CTA`
-      : `Fluxo interno (NÃO escreva esses rótulos no texto final):
-gancho → problema → solução em 2-3 pontos → CTA`
+- Fluxo de conversa (NÃO escreva os rótulos): gancho → a ideia contada como ele contaria pra um amigo → a sacada dele → CTA`
+      : `Fluxo de conversa (NÃO escreva esses rótulos no texto final):
+gancho → a resposta dele pra dúvida, contada como conversa (uma ideia, sem lista) → a sacada dele → CTA`
 }
 
 FORMATAÇÃO DO OUTPUT (obrigatório):
@@ -549,15 +551,15 @@ Como escolher:
 
 Outras regras:
 - Português do Brasil
-- Texto falado, natural
+- Texto falado, natural, de conversa
 - Seja específico e útil
-- Máximo ~220 palavras
+- Entre 80 e 150 palavras (30 a 60 segundos falados)
 
 ${NO_SLOP_RULES}`,
       },
       {
         role: "user",
-        content: `Escreva só o texto falado do Reel 90s (teleprompter limpo):
+        content: `Escreva só o que ele vai falar no Reel (teleprompter limpo), como conversa:
 
 Título: ${input.title}
 Resumo: ${input.summary}
@@ -570,7 +572,7 @@ ${input.userNotes?.trim() || "(nenhuma ideia extra)"}
 BRIEFING DE PESQUISA (internet / Bambu Lab / Bambu Studio):
 ${research}
 
-LEMBRETE FINAL: zero metáfora/analogia com objetos (nada de "tipo palito de dente"). Fale direto. Use parágrafos curtos com linha em branco entre eles. Não mencione Z-offset.
+LEMBRETE FINAL: conversa, não aula. Primeira pessoa, frases curtas, uma ideia. Zero metáfora com objetos (nada de "tipo palito de dente"). Parágrafos curtos com linha em branco entre eles. Não mencione Z-offset.
 ${input.kind === "polemic" ? "Este é um Reel POLÊMICO: um lado só, comentário no meio, CTA CHAT ou NICHOS só no final." : ""}`,
       },
     ],
@@ -579,14 +581,56 @@ ${input.kind === "polemic" ? "Este é um Reel POLÊMICO: um lado só, comentári
   const content = completion.choices[0]?.message?.content?.trim();
   if (!content) throw new Error("OpenAI não retornou o roteiro");
 
+  const cleaned = stripSlop(stripForcedMetaphors(cleanTeleprompterText(content)));
+  const revised = await reviseSlop(cleaned, input.tone);
   return {
-    content: ensureFixedCta(
-      stripSlop(stripForcedMetaphors(cleanTeleprompterText(content))),
-      input.title,
-      input.summary,
-    ),
+    content: ensureFixedCta(revised, input.title, input.summary),
     model: MODEL_QUALITY,
   };
+}
+
+/**
+ * Revisão automática: se o texto ainda tiver muleta de IA ou tom de aula,
+ * reescreve só as frases marcadas e mantém o resto igual.
+ */
+async function reviseSlop(text: string, tone: string): Promise<string> {
+  const hits = findSlop(text);
+  if (hits.length === 0) return text;
+  try {
+    const client = getClient();
+    const completion = await client.chat.completions.create({
+      model: MODEL_QUALITY,
+      temperature: 0.4,
+      messages: [
+        {
+          role: "system",
+          content: `Você revisa roteiros falados (talking head) para soarem como conversa do criador, não como IA nem como aula.
+Reescreva SÓ as frases marcadas, no jeito dele de falar. Pode juntar ou apagar uma frase marcada se ela só enche linguiça.
+Todo o resto fica IGUAL, palavra por palavra, inclusive a última linha com "Digite CHAT" ou "Digite NICHOS".
+Mantenha os parágrafos e as linhas em branco. Devolva só o roteiro completo, sem comentários.
+
+TOM DE VOZ DO CRIADOR:
+${tone.slice(0, 6000)}
+
+${PERSONAL_VOICE}`,
+        },
+        {
+          role: "user",
+          content: `FRASES MARCADAS (e o motivo):
+${hits.map((h) => `- "${h.sentence}" → ${h.why}`).join("\n")}
+
+ROTEIRO:
+${text}`,
+        },
+      ],
+    });
+    const out = completion.choices[0]?.message?.content?.trim();
+    // só aceita se veio um roteiro de tamanho parecido (evita resposta quebrada)
+    if (!out || out.length < text.length * 0.5) return text;
+    return stripSlop(stripForcedMetaphors(cleanTeleprompterText(out)));
+  } catch {
+    return text;
+  }
 }
 
 const CTA_CHAT =
@@ -601,16 +645,25 @@ function pickCta(title: string, summary: string): string {
   return nicheHints.test(text) ? CTA_NICHOS : CTA_CHAT;
 }
 
+const CTA_SENTENCE = /[^.!?\n]*\bdigite\s+(chat|nichos)\b[^.!?\n]*[.!?]?/gi;
+
+/**
+ * Deixa exatamente um CTA, a frase oficial, no fim.
+ * O modelo às vezes escreve variações ("pra" em vez de "para", com ponte na mesma frase);
+ * todas saem e entra a oficial, respeitando se ele escolheu CHAT ou NICHOS.
+ */
 function ensureFixedCta(content: string, title: string, summary: string): string {
-  const cta = pickCta(title, summary);
-  const normalized = content.replace(/\s+/g, " ").trim().toLowerCase();
-  if (
-    normalized.includes(CTA_CHAT.toLowerCase()) ||
-    normalized.includes(CTA_NICHOS.toLowerCase())
-  ) {
-    return content.trim();
-  }
-  return `${content.trim()}\n\n${cta}`;
+  const chosen = [...content.matchAll(CTA_SENTENCE)].pop()?.[1]?.toLowerCase();
+  const cta =
+    chosen === "nichos" ? CTA_NICHOS : chosen === "chat" ? CTA_CHAT : pickCta(title, summary);
+  const body = content
+    .replace(CTA_SENTENCE, "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return `${body}\n\n${cta}`;
 }
 
 function cleanTeleprompterText(text: string): string {
@@ -797,7 +850,10 @@ Regras:
 - Use o BRIEFING DE PESQUISA como fonte da verdade; não invente menus, temperaturas ou recursos
 - A ideia veio de vídeos de referência; não copie, faça a versão do criador
 - O vídeo é falado para a câmera: não peça para imprimir peças novas para gravar
+- ABERTURA e FECHAMENTO são falas dele: conversa, não aula (vale a VOZ abaixo)
 ${CREATOR_FORMAT}
+
+${PERSONAL_VOICE}
 - Se houver IDEIAS DO CRIADOR, use
 ${NOMENCLATURE_RULES}
 ${BAMBU_CONTEXT_RULES}

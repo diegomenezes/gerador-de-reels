@@ -98,7 +98,7 @@ export function TopicActions({
               ? "Pesquisando + gerando..."
               : long
                 ? "Gerar estrutura do vídeo"
-                : "Gerar roteiro 90s"}
+                : "Gerar roteiro"}
           </button>
         )}
 
