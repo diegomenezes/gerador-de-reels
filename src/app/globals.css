@@ -21,6 +21,8 @@
   --font-mono: var(--font-mono);
 }
 
+/* em camadas: as classes utilitárias do Tailwind sempre podem ajustar estes estilos */
+@layer base {
 * {
   box-sizing: border-box;
 }
@@ -51,7 +53,9 @@ textarea,
 select {
   font: inherit;
 }
+}
 
+@layer components {
 .card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -170,4 +174,5 @@ select {
     word-break: break-word;
     white-space: pre-wrap;
   }
+}
 }

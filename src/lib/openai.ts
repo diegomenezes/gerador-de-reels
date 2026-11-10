@@ -5,6 +5,13 @@ import { NO_SLOP_RULES, stripSlop } from "./no-slop";
 
 export type IdeaKind = "question" | "polemic" | "viral" | "youtube";
 
+/** Como o criador grava: quase sempre falando para a câmera. */
+const CREATOR_FORMAT = `FORMATO DO CRIADOR (obrigatório):
+- Quase todos os vídeos são TALKING HEAD: ele fala direto para a câmera, sem imprimir nada para mostrar
+- De vez em quando segura ou mostra uma ferramenta, um carretel ou uma peça que já tem pronta
+- Ele NÃO imprime coisas novas só para gravar (leva tempo demais) e não faz timelapse, ASMR nem "olha o que eu imprimi"
+- Então toda ideia tem que funcionar só com ele falando: explicação, opinião, erro comum, mito, comparação contada, dinheiro/negócio, curiosidade, novidade, polêmica, história`;
+
 /** Rótulo dos exemplos de cada tipo de ideia nos prompts. */
 function examplesLabel(kind?: IdeaKind) {
   if (kind === "viral" || kind === "youtube") {
@@ -492,9 +499,10 @@ ${
       ? `FORMATO VIRAL ADAPTADO (prioridade alta):
 - A ideia veio de vídeos que estão indo bem no TikTok, Reels ou Shorts, alguns em inglês ou espanhol
 - NÃO traduza nem copie o vídeo de referência: pegue o que fez ele funcionar e faça a versão do criador, pro público brasileiro
-- Tem que ser algo que o criador consegue gravar com a impressora dele
+- É vídeo FALADO para a câmera: nada de "olha essa peça que imprimi", "vou imprimir", "veja o timelapse"
+- Pode mencionar algo que ele segura na mão, mas o roteiro funciona só com a fala
 - Não cite o vídeo, o perfil nem a rede de onde veio
-- Fluxo interno (NÃO escreva os rótulos): gancho forte → o que a pessoa vai ver → por que funciona → CTA`
+- Fluxo interno (NÃO escreva os rótulos): gancho forte → o ponto principal → 2-3 argumentos ou passos concretos → CTA`
       : `Fluxo interno (NÃO escreva esses rótulos no texto final):
 gancho → problema → solução em 2-3 pontos → CTA`
 }
@@ -679,10 +687,11 @@ export async function generateViralIdeas(
   const formatRules =
     format === "long"
       ? `Formato: VÍDEO LONGO de YouTube (8 a 20 minutos) para o canal do criador.
-- Cada ideia tem que render um vídeo inteiro: teste, comparação, projeto do começo ao fim, guia completo, desafio
+- Cada ideia tem que render um vídeo inteiro falado: guia explicado, análise, comparação contada, erros e acertos, opinião, bastidores de negócio
+- Pode citar uma peça ou ferramenta que ele já tem para mostrar na mão, mas o vídeo não depende de imprimir nada novo
 - title = título do vídeo no YouTube, em português, até 70 caracteres`
       : `Formato: vídeo CURTO (Reels/Shorts/TikTok, até 90 segundos).
-- Cada ideia é UM vídeo com uma coisa só: uma peça, um truque, um antes/depois, um teste rápido
+- Cada ideia é UM vídeo com um assunto só, contado em até 90 segundos de fala
 - title = a primeira frase falada do vídeo (o gancho), em português, curta`;
 
   const completion = await client.chat.completions.create({
@@ -701,13 +710,19 @@ Crie até ${max} ideias de vídeo para o criador gravar.
 
 ${formatRules}
 
+${CREATOR_FORMAT}
+
+Como usar os vídeos:
+- Use os vídeos para descobrir O ASSUNTO que está chamando atenção (a dúvida, a curiosidade, o erro, a polêmica, o dinheiro, a novidade), não o visual
+- Vídeo de peça impressa vira assunto falado. Ex.: "mostrou um vaso que vende muito" → "por que vaso decorativo vende tanto e quanto cobrar"; "timelapse de uma peça gigante" → "o que ninguém te conta sobre imprimir peça grande"
+- Vídeo que só funciona pelo visual (timelapse, ASMR, satisfying, "olha o que eu fiz") e não rende assunto falado: IGNORE
+- Se poucos vídeos renderem ideia falada boa, devolva menos ideias. Não force
+
 Regras:
-- Procure o PADRÃO que fez os vídeos funcionarem (formato, tipo de peça, curiosidade, erro, resultado visual) e não só o assunto
 - Ideia nova pro público brasileiro: não é tradução do vídeo de lá
-- Tem que ser gravável por um criador com impressora Bambu Lab em casa
 - Junte vídeos parecidos numa ideia só; ideias diferentes não podem ser o mesmo vídeo com outras palavras
 - Prefira o que tem mais views e likes, mas um vídeo menor com formato muito bom também vale
-- summary = 2 frases: o que o vídeo mostra e por que deve funcionar (cite o padrão que você viu)
+- summary = 2 frases: o que ele fala no vídeo e por que esse assunto deve funcionar (cite o que você viu nas referências)
 - score = potencial de viralizar no Brasil (0-100)
 - sources = números (da lista) dos vídeos que inspiraram a ideia, do mais forte pro mais fraco
 ${coveredThemesBlock(covered)}
@@ -771,7 +786,7 @@ ABERTURA (primeiros 30 segundos, texto falado)
 O texto que ele fala na abertura: promessa clara do vídeo e por que ficar até o fim. Sem "fala pessoal, tudo bem".
 
 CAPÍTULOS
-De 4 a 7 capítulos. Para cada um: "1. Nome do capítulo" e embaixo 2 a 4 linhas do que mostrar e falar (o que gravar, o que imprimir, o que medir ou comparar).
+De 4 a 7 capítulos. Para cada um: "1. Nome do capítulo" e embaixo 2 a 4 linhas do que ele fala (e, só se fizer sentido, o que segura na mão ou mostra na tela).
 
 FECHAMENTO
 2 a 3 frases faladas para fechar, com o CTA: Digite CHAT nos comentários para entrar no meu grupo de WhatsApp onde falamos sobre impressão 3d.
@@ -780,6 +795,8 @@ Regras:
 - Português do Brasil
 - Use o BRIEFING DE PESQUISA como fonte da verdade; não invente menus, temperaturas ou recursos
 - A ideia veio de vídeos de referência; não copie, faça a versão do criador
+- O vídeo é falado para a câmera: não peça para imprimir peças novas para gravar
+${CREATOR_FORMAT}
 - Se houver IDEIAS DO CRIADOR, use
 ${NOMENCLATURE_RULES}
 ${BAMBU_CONTEXT_RULES}

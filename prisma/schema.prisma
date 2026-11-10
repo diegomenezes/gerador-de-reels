@@ -177,6 +177,8 @@ model JobRun {
   messagesKept  Int       @default(0)
   topicsCreated Int       @default(0)
   videosIn      Int       @default(0)
+  // daily (automático) | group | viral | youtube
+  mode          String    @default("daily")
   error         String?
 }
 
@@ -186,7 +188,7 @@ model AppSettings {
   groupSource    Boolean  @default(true)
   viralSource    Boolean  @default(true)
   // termos por idioma em JSON: { "pt": [...], "en": [...], "es": [...] }
-  viralTerms     String   @default("{\"pt\":[\"impressão 3d\"],\"en\":[\"3d printing\"],\"es\":[\"impresión 3d\"]}")
+  viralTerms     String   @default("{\"pt\":[\"dicas impressão 3d\"],\"en\":[\"3d printing tips\"],\"es\":[\"consejos impresión 3d\"]}")
   viralPerSearch Int      @default(10)
   // redes ligadas na busca diária, separadas por vírgula
   viralPlatforms String   @default("tiktok,instagram,youtube")

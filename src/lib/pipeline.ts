@@ -12,6 +12,7 @@ import {
 } from "./openai";
 import { readToneOfVoice } from "./tone";
 import {
+  cleanText,
   collectVideos,
   formatCount,
   getSettings,
@@ -48,7 +49,8 @@ async function setStage(
   });
 }
 
-export type PipelineMode = "daily" | "youtube";
+/** daily = job automático (fontes ligadas em Ajustes); os outros rodam uma fonte só, pelo botão. */
+export type PipelineMode = "daily" | "group" | "viral" | "youtube";
 
 async function coveredThemes() {
   return prisma.topic.findMany({
@@ -212,7 +214,7 @@ async function runVideoSource(
         kind: mode === "long" ? "youtube" : "viral",
         examples: {
           create: sources.slice(0, 5).map((v) => ({
-            text: `${PLATFORM_LABEL[v.platform] ?? v.platform} · ${formatCount(v.views)} views · ${v.caption.replace(/\s+/g, " ").slice(0, 160)}`,
+            text: `${PLATFORM_LABEL[v.platform] ?? v.platform} · ${formatCount(v.views)} views · ${cleanText(v.caption.replace(/\s+/g, " "), 160)}`,
             url: v.url,
           })),
         },
@@ -240,10 +242,10 @@ export async function runDailyPipeline(
   const job = existingJobId
     ? await prisma.jobRun.update({
         where: { id: existingJobId },
-        data: { running: true, stage: "Iniciando...", error: null },
+        data: { running: true, stage: "Iniciando...", error: null, mode },
       })
     : await prisma.jobRun.create({
-        data: { running: true, stage: "Iniciando..." },
+        data: { running: true, stage: "Iniciando...", mode },
       });
 
   const dateBucket = format(new Date(), "yyyy-MM-dd");
@@ -263,7 +265,9 @@ export async function runDailyPipeline(
       anySuccess = true;
       if (result.errors.length) errors.push(...result.errors.slice(0, 3));
     } else {
-      if (settings.groupSource) {
+      const runGroup = mode === "group" || (mode === "daily" && settings.groupSource);
+      const runViral = mode === "viral" || (mode === "daily" && settings.viralSource);
+      if (runGroup) {
         anySource = true;
         try {
           const result = await runGroupSource(job.id, dateBucket);
@@ -275,7 +279,7 @@ export async function runDailyPipeline(
           errors.push(`Grupo: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      if (settings.viralSource) {
+      if (runViral) {
         anySource = true;
         try {
           const result = await runVideoSource(job.id, dateBucket, "short", progress);
@@ -285,7 +289,7 @@ export async function runDailyPipeline(
           errors.push(`Vídeos: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      if (!anySource) throw new Error("Ligue pelo menos uma fonte de ideias em Config");
+      if (!anySource) throw new Error("Nenhuma fonte ligada no job automático (Ajustes → Fontes)");
     }
 
     if (!anySuccess) throw new Error(errors.join(" | "));

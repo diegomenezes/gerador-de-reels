@@ -12,6 +12,7 @@ type Props = {
   requireSelectedHook?: boolean;
   initialNotes?: string;
   showNotesField?: boolean;
+  kind?: string;
 };
 
 export function TopicActions({
@@ -22,11 +23,14 @@ export function TopicActions({
   requireSelectedHook = false,
   initialNotes = "",
   showNotesField = true,
+  kind,
 }: Props) {
+  const long = kind === "youtube";
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [userNotes, setUserNotes] = useState(initialNotes);
+  const [notesOpen, setNotesOpen] = useState(Boolean(initialNotes));
 
   async function run(action: string, fn: () => Promise<void>) {
     setLoading(action);
@@ -48,7 +52,16 @@ export function TopicActions({
 
   return (
     <div className="mt-4 flex flex-col gap-2">
-      {showNotesField && canGenerate && (showGenerate || showRegenerate) && (
+      {showNotesField && canGenerate && (showGenerate || showRegenerate) && !notesOpen && (
+        <button
+          type="button"
+          className="self-start text-sm text-[var(--accent)] underline-offset-2 hover:underline"
+          onClick={() => setNotesOpen(true)}
+        >
+          + Adicionar suas ideias para o roteiro (opcional)
+        </button>
+      )}
+      {showNotesField && canGenerate && (showGenerate || showRegenerate) && notesOpen && (
         <div className="space-y-1">
           <label className="text-sm text-[var(--ink-soft)]">
             Suas ideias sobre o tema (opcional)
@@ -83,7 +96,9 @@ export function TopicActions({
           >
             {loading === "script"
               ? "Pesquisando + gerando..."
-              : "Gerar roteiro 90s"}
+              : long
+                ? "Gerar estrutura do vídeo"
+                : "Gerar roteiro 90s"}
           </button>
         )}
 
@@ -92,7 +107,7 @@ export function TopicActions({
             href={`/roteiros?topic=${topicId}`}
             className="btn btn-secondary text-sm"
           >
-            Ver roteiro
+            {long ? "Ver estrutura" : "Ver roteiro"}
           </Link>
         )}
 
@@ -115,7 +130,9 @@ export function TopicActions({
           >
             {loading === "script"
               ? "Pesquisando + gerando..."
-              : "Regenerar roteiro"}
+              : long
+                ? "Refazer estrutura"
+                : "Regenerar roteiro"}
           </button>
         )}
 
@@ -134,7 +151,11 @@ export function TopicActions({
               })
             }
           >
-            {loading === "caption" ? "Gerando legenda..." : "Gerar legenda"}
+            {loading === "caption"
+              ? "Gerando..."
+              : long
+                ? "Gerar descrição"
+                : "Gerar legenda"}
           </button>
         )}
 

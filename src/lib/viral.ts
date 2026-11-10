@@ -102,8 +102,17 @@ function num(...values: unknown[]): number {
   return 0;
 }
 
+/** Corta por caractere (sem partir emoji) e tira escapes \uXXXX e metades de emoji soltas. */
+export function cleanText(value: string, max = Infinity): string {
+  const clean = value
+    .replace(/\\u[0-9a-fA-F]{0,4}/g, "")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+  const chars = Array.from(clean);
+  return chars.length > max ? chars.slice(0, max).join("") : clean;
+}
+
 function str(...values: unknown[]): string {
-  for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
+  for (const v of values) if (typeof v === "string" && v.trim()) return cleanText(v.trim());
   return "";
 }
 

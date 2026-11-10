@@ -6,7 +6,8 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { mode?: string } | null;
-  const mode: PipelineMode = body?.mode === "youtube" ? "youtube" : "daily";
+  const MODES: PipelineMode[] = ["daily", "group", "viral", "youtube"];
+  const mode = MODES.find((m) => m === body?.mode) ?? "daily";
   // a busca de vídeos no Apify pode levar vários minutos
   const staleBefore = new Date(Date.now() - 30 * 60 * 1000);
   await prisma.jobRun.updateMany({
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   }
 
   const job = await prisma.jobRun.create({
-    data: { running: true, stage: "Na fila..." },
+    data: { running: true, stage: "Na fila...", mode },
   });
 
   // Roda em background para o front poder acompanhar o progresso
