@@ -15,7 +15,10 @@ import {
   collectVideos,
   formatCount,
   getSettings,
+  parseAuthors,
+  parsePlatforms,
   parseTerms,
+  type Platform,
   pickVideosForIdeas,
   PLATFORM_LABEL,
 } from "./viral";
@@ -46,8 +49,6 @@ async function setStage(
 }
 
 export type PipelineMode = "daily" | "youtube";
-
-const SHORT_PLATFORMS = ["tiktok", "instagram", "youtube"] as const;
 
 async function coveredThemes() {
   return prisma.topic.findMany({
@@ -158,20 +159,22 @@ async function runVideoSource(
 ) {
   const settings = await getSettings();
   const terms = parseTerms(settings.viralTerms);
-  const platforms = mode === "long" ? (["youtube-long"] as const) : SHORT_PLATFORMS;
+  const platforms: Platform[] =
+    mode === "long" ? ["youtube-long"] : parsePlatforms(settings.viralPlatforms);
 
   await setStage(jobId, "Buscando vídeos...");
   const { found, errors } = await collectVideos(
-    [...platforms],
+    platforms,
     terms,
     settings.viralPerSearch,
+    parseAuthors(settings.ignoreAuthors),
     (label) => setStage(jobId, `Buscando vídeos · ${label}`),
   );
   await prisma.jobRun.update({ where: { id: jobId }, data: { videosIn: found } });
   if (errors.length > 0) console.error("[virais]", errors.join(" | "));
 
   await setStage(jobId, "Gerando ideias a partir dos vídeos...");
-  const videos = await pickVideosForIdeas([...platforms], mode === "long" ? 30 : 20, 7);
+  const videos = await pickVideosForIdeas(platforms, mode === "long" ? 30 : 20, 7);
   if (videos.length === 0) return { found, topicsCreated: 0, errors };
 
   const covered = await coveredThemes();
@@ -183,7 +186,8 @@ async function runVideoSource(
       likes: v.likes,
       caption: v.caption,
     })),
-    mode === "long" ? 8 : 10,
+    // poucas referências não rendem muitas ideias boas
+    Math.min(mode === "long" ? 8 : 10, Math.max(3, videos.length)),
     covered,
     mode,
   );
@@ -192,8 +196,10 @@ async function runVideoSource(
   let topicsCreated = 0;
   const used = new Set<string>();
   for (const idea of ideas) {
-    if (!seen.accept(idea.title)) continue;
     const sources = idea.sources.map((n) => videos[n - 1]).filter(Boolean);
+    // duas ideias puxadas do mesmo vídeo principal são a mesma ideia
+    if (sources.length === 0 || used.has(sources[0].id)) continue;
+    if (!seen.accept(idea.title)) continue;
     sources.forEach((v) => used.add(v.id));
     await prisma.topic.create({
       data: {
@@ -206,7 +212,7 @@ async function runVideoSource(
         kind: mode === "long" ? "youtube" : "viral",
         examples: {
           create: sources.slice(0, 5).map((v) => ({
-            text: `${PLATFORM_LABEL[v.platform] ?? v.platform} · ${v.language.toUpperCase()} · ${formatCount(v.views)} views · ${v.caption.replace(/\s+/g, " ").slice(0, 160)}`,
+            text: `${PLATFORM_LABEL[v.platform] ?? v.platform} · ${formatCount(v.views)} views · ${v.caption.replace(/\s+/g, " ").slice(0, 160)}`,
             url: v.url,
           })),
         },

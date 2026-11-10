@@ -188,6 +188,10 @@ model AppSettings {
   // termos por idioma em JSON: { "pt": [...], "en": [...], "es": [...] }
   viralTerms     String   @default("{\"pt\":[\"impressão 3d\"],\"en\":[\"3d printing\"],\"es\":[\"impresión 3d\"]}")
   viralPerSearch Int      @default(10)
+  // redes ligadas na busca diária, separadas por vírgula
+  viralPlatforms String   @default("tiktok,instagram,youtube")
+  // perfis ignorados (os seus próprios), separados por vírgula
+  ignoreAuthors  String   @default("primeirasimpressoes.3d")
   updatedAt      DateTime @updatedAt
 }
 

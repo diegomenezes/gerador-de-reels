@@ -4,7 +4,8 @@ import { apifyConfigured } from "@/lib/apify";
 import { prisma } from "@/lib/db";
 import { readHookModels } from "@/lib/hook-models";
 import { readToneOfVoice } from "@/lib/tone";
-import { COST_PER_VIDEO_USD, getSettings, parseTerms } from "@/lib/viral";
+import { costPerVideo, getSettings, parsePlatforms, parseTerms } from "@/lib/viral";
+import { youtubeApiConfigured } from "@/lib/youtube";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +31,18 @@ export default async function ConfigPage() {
           viralSource: settings.viralSource,
           viralPerSearch: settings.viralPerSearch,
           viralTerms: parseTerms(settings.viralTerms),
+          viralPlatforms: parsePlatforms(settings.viralPlatforms).filter(
+            (p): p is "tiktok" | "instagram" | "youtube" => p !== "youtube-long",
+          ),
+          ignoreAuthors: settings.ignoreAuthors,
         }}
         apifyReady={apifyConfigured()}
-        costPerVideo={COST_PER_VIDEO_USD}
+        costs={{
+          tiktok: costPerVideo("tiktok"),
+          instagram: costPerVideo("instagram"),
+          youtube: costPerVideo("youtube"),
+        }}
+        youtubeApiReady={youtubeApiConfigured()}
       />
       <ConfigPanel
         lastJob={

@@ -8,6 +8,8 @@ const Body = z.object({
   groupSource: z.boolean(),
   viralSource: z.boolean(),
   viralPerSearch: z.number().int().min(1).max(50),
+  viralPlatforms: z.array(z.enum(["tiktok", "instagram", "youtube"])),
+  ignoreAuthors: z.string().max(500),
   viralTerms: z.object({
     pt: z.array(term).max(10),
     en: z.array(term).max(10),
@@ -24,10 +26,10 @@ export async function PUT(request: Request) {
     );
   }
   await getSettings();
-  const { viralTerms, ...rest } = parsed.data;
+  const { viralTerms, viralPlatforms, ...rest } = parsed.data;
   await prisma.appSettings.update({
     where: { id: "default" },
-    data: { ...rest, viralTerms: JSON.stringify(viralTerms) },
+    data: { ...rest, viralTerms: JSON.stringify(viralTerms), viralPlatforms: viralPlatforms.join(",") },
   });
   return NextResponse.json({ ok: true });
 }

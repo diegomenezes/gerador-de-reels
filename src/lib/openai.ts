@@ -672,7 +672,7 @@ export async function generateViralIdeas(
   const catalog = videos
     .map(
       (v, i) =>
-        `${i + 1}. [${v.platform} · ${v.language.toUpperCase()} · ${v.views} views · ${v.likes} likes] ${v.caption.replace(/\s+/g, " ").slice(0, 300)}`,
+        `${i + 1}. [${v.platform} · ${v.views} views · ${v.likes} likes] ${v.caption.replace(/\s+/g, " ").slice(0, 300)}`,
     )
     .join("\n");
 

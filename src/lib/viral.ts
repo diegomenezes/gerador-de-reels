@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { runActor } from "./apify";
+import { searchYoutube, youtubeApiConfigured } from "./youtube";
 
 // Busca de vídeos de impressão 3D que estão indo bem no TikTok, Reels e YouTube.
 
@@ -18,8 +19,37 @@ export const PLATFORM_LABEL: Record<string, string> = {
   "youtube-long": "YouTube",
 };
 
-// preço aproximado por vídeo no Apify (resultado + filtros), para estimar o custo
-export const COST_PER_VIDEO_USD = 0.005;
+export type Platform = "tiktok" | "instagram" | "youtube" | "youtube-long";
+export const SHORT_PLATFORMS = ["tiktok", "instagram", "youtube"] as const;
+
+// preço real medido por vídeo no Apify (resultado + filtros pagos)
+const APIFY_COST: Record<Platform, number> = {
+  tiktok: 0.0068,
+  instagram: 0.0026,
+  youtube: 0.004,
+  "youtube-long": 0.004,
+};
+
+/** Custo por vídeo; o YouTube sai de graça quando a API oficial está configurada. */
+export function costPerVideo(platform: Platform): number {
+  if ((platform === "youtube" || platform === "youtube-long") && youtubeApiConfigured()) return 0;
+  return APIFY_COST[platform];
+}
+
+export function parsePlatforms(raw: string): Platform[] {
+  const valid = new Set<string>(SHORT_PLATFORMS);
+  return raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p): p is Platform => valid.has(p));
+}
+
+export function parseAuthors(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((a) => a.trim().replace(/^@/, "").toLowerCase())
+    .filter(Boolean);
+}
 
 const ACTORS = {
   tiktok: "clockworks/tiktok-scraper",
@@ -156,13 +186,14 @@ function hashtag(term: string) {
 }
 
 function limits(perSearch: number) {
-  // margem para filtros pagos e início do ator
-  return { maxItems: perSearch, maxTotalChargeUsd: Math.max(0.1, perSearch * 0.012) };
+  // o Apify exige teto mínimo de US$ 0,50 por execução; o gasto real é por vídeo
+  return { maxItems: perSearch, maxTotalChargeUsd: Math.max(0.5, perSearch * 0.012) };
 }
 
 async function fetchPlatform(
-  platform: "tiktok" | "instagram" | "youtube" | "youtube-long",
+  platform: Platform,
   term: string,
+  lang: Lang,
   perSearch: number,
 ): Promise<Video[]> {
   if (platform === "tiktok") {
@@ -193,19 +224,30 @@ async function fetchPlatform(
     return items.map(fromInstagram).filter((v): v is Video => v !== null);
   }
   const long = platform === "youtube-long";
+  if (youtubeApiConfigured()) {
+    const videos = await searchYoutube(term, lang, perSearch, long ? "long" : "short");
+    return videos.map((v) => ({
+      platform,
+      externalId: v.id,
+      url: v.url,
+      caption: v.description ? `${v.title}\n${v.description}` : v.title,
+      author: v.channel || null,
+      views: v.views,
+      likes: v.likes,
+      comments: v.comments,
+      publishedAt: v.publishedAt,
+    }));
+  }
+  // sem a API oficial: Apify. A busca de Shorts com ordenação/data volta vazia, então vai sem.
   const items = await runActor(
     ACTORS.youtube,
-    {
-      searchQueries: [term],
-      maxResults: long ? perSearch : 0,
-      maxResultsShorts: long ? 0 : perSearch,
-      maxResultStreams: 0,
-      sortingOrder: "views",
-      dateFilter: long ? "year" : "month",
-    },
+    long
+      ? { searchQueries: [term], maxResults: perSearch, maxResultsShorts: 0, maxResultStreams: 0, sortingOrder: "views", dateFilter: "year" }
+      : { searchQueries: [term], maxResults: 0, maxResultsShorts: perSearch, maxResultStreams: 0 },
     limits(perSearch),
   );
   return items
+    .filter((item) => !item.error)
     .filter((item) => !long || durationSeconds(item.duration) === 0 || durationSeconds(item.duration) >= 240)
     .map((item) => fromYouTube(item, platform))
     .filter((v): v is Video => v !== null);
@@ -216,11 +258,14 @@ async function fetchPlatform(
  * Uma rede com erro não derruba as outras; só falha se todas falharem.
  */
 export async function collectVideos(
-  platforms: ("tiktok" | "instagram" | "youtube" | "youtube-long")[],
+  platforms: Platform[],
   terms: ViralTerms,
   perSearch: number,
+  ignoreAuthors: string[],
   onProgress?: (label: string) => Promise<void> | void,
 ): Promise<{ found: number; errors: string[] }> {
+  if (platforms.length === 0) throw new Error("Ligue pelo menos uma rede em Config");
+  const ignored = new Set(ignoreAuthors);
   const searches = LANGS.flatMap(({ id }) => terms[id].map((term) => ({ lang: id, term })));
   if (searches.length === 0) throw new Error("Cadastre pelo menos um termo de busca em Config");
 
@@ -234,9 +279,11 @@ export async function collectVideos(
       for (const { lang, term } of searches) {
         try {
           await onProgress?.(`${PLATFORM_LABEL[platform]}: "${term}"`);
-          const videos = await fetchPlatform(platform, term, perSearch);
+          const videos = await fetchPlatform(platform, term, lang, perSearch);
           platformOk = true;
           for (const video of videos) {
+            // seus próprios vídeos não viram referência
+            if (video.author && ignored.has(video.author.toLowerCase())) continue;
             await prisma.viralVideo.upsert({
               where: {
                 platform_externalId: { platform: video.platform, externalId: video.externalId },
