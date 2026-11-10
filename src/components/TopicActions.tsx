@@ -45,6 +45,42 @@ export function TopicActions({
     }
   }
 
+  const [elapsed, setElapsed] = useState(0);
+
+  /**
+   * Dispara o roteiro em segundo plano e espera terminar perguntando ao servidor.
+   * (Com transcrição passa de 1 minuto, e o nginx corta requisições longas.)
+   */
+  async function generateScript(withTranscript: boolean) {
+    const start = Date.now();
+    setElapsed(0);
+    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    try {
+      const res = await fetch(`/api/topics/${topicId}/script`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userNotes, withTranscript }),
+      });
+      if (!res.ok) throw new Error("Não consegui começar o roteiro. Tente de novo.");
+      // até 8 minutos
+      for (let i = 0; i < 240; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const status = await fetch(`/api/topics/${topicId}/script`)
+          .then((r) => r.json())
+          .catch(() => null);
+        if (status?.state === "done") return;
+        if (status?.state === "error") throw new Error(status.error || "Falha ao gerar");
+        // o app reiniciou no meio: some o andamento
+        if (status?.state === "idle") {
+          throw new Error("A geração foi interrompida. Atualize a página e tente de novo.");
+        }
+      }
+      throw new Error("Demorou demais. Atualize a página para ver se ficou pronto.");
+    } finally {
+      clearInterval(tick);
+    }
+  }
+
   const canGenerate =
     (!hasScript || status !== "discarded") && status !== "discarded";
   const showGenerate = !hasScript && status !== "discarded";
@@ -83,19 +119,11 @@ export function TopicActions({
             className="btn btn-primary text-sm"
             disabled={!!loading}
             onClick={() =>
-              run("script", async () => {
-                const res = await fetch(`/api/topics/${topicId}/script`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userNotes }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Falha ao gerar");
-              })
+              run("script", () => generateScript(false))
             }
           >
             {loading === "script"
-              ? "Pesquisando + gerando..."
+              ? `Pesquisando + gerando... ${elapsed}s`
               : long
                 ? "Gerar estrutura do vídeo"
                 : "Gerar roteiro"}
@@ -117,19 +145,11 @@ export function TopicActions({
             className="btn btn-secondary text-sm"
             disabled={!!loading}
             onClick={() =>
-              run("script", async () => {
-                const res = await fetch(`/api/topics/${topicId}/script`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userNotes }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Falha ao gerar");
-              })
+              run("script", () => generateScript(false))
             }
           >
             {loading === "script"
-              ? "Pesquisando + gerando..."
+              ? `Pesquisando + gerando... ${elapsed}s`
               : long
                 ? "Refazer estrutura"
                 : "Regenerar roteiro"}
@@ -144,19 +164,11 @@ export function TopicActions({
             disabled={!!loading}
             title="Busca o que foi falado nos vídeos de referência e usa como base do conteúdo"
             onClick={() =>
-              run("transcript", async () => {
-                const res = await fetch(`/api/topics/${topicId}/script`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userNotes, withTranscript: true }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Falha ao gerar");
-              })
+              run("transcript", () => generateScript(true))
             }
           >
             {loading === "transcript"
-              ? "Ouvindo os vídeos + gerando..."
+              ? `Ouvindo os vídeos + gerando... ${elapsed}s`
               : hasScript
                 ? "Refazer com a fala do vídeo"
                 : "Gerar com a fala do vídeo"}
